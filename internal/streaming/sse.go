@@ -22,6 +22,7 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 	contentBlockStarted := false
 	contentBlockIndex := 0
 	totalOutputTokens := 0
+	toolCallAccumulators := make(map[int]*toolCallAcc) // index -> accumulator
 
 	// Emit message_start
 	writeAnthropicEvent(writer, flusher, canFlush, "message_start", anthropic.MessageStartEvent{
@@ -71,63 +72,108 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 
 		choice := chunk.Choices[0]
 
-		// If there's content in the delta
-		if choice.Delta.Content != "" {
-			// Start content block if not started
-			if !contentBlockStarted {
-				writeAnthropicEvent(writer, flusher, canFlush, "content_block_start", anthropic.ContentBlockStartEvent{
-					Type:  "content_block_start",
-					Index: contentBlockIndex,
-					ContentBlock: anthropic.ContentBlock{
-						Type: "text",
-						Text: "",
-					},
-				})
-				contentBlockStarted = true
-			}
+	// If there's content in the delta
+	if choice.Delta.Content != "" {
+		// Start content block if not started
+		if !contentBlockStarted {
+			writeAnthropicEvent(writer, flusher, canFlush, "content_block_start", anthropic.ContentBlockStartEvent{
+				Type:  "content_block_start",
+				Index: contentBlockIndex,
+				ContentBlock: anthropic.ContentBlock{
+					Type: "text",
+					Text: "",
+				},
+			})
+			contentBlockStarted = true
+		}
 
-			// Emit text delta
+		// Emit text delta
+		writeAnthropicEvent(writer, flusher, canFlush, "content_block_delta", anthropic.ContentBlockDeltaEvent{
+			Type:  "content_block_delta",
+			Index: contentBlockIndex,
+			Delta: anthropic.DeltaBlock{
+				Type: "text_delta",
+				Text: choice.Delta.Content,
+			},
+		})
+		totalOutputTokens++
+	}
+
+	// Handle tool call deltas
+	for _, tcd := range choice.Delta.ToolCalls {
+		if tcd.Function == nil {
+			continue
+		}
+		acc, exists := toolCallAccumulators[tcd.Index]
+		if !exists {
+			acc = &toolCallAcc{id: tcd.ID, name: tcd.Function.Name}
+			toolCallAccumulators[tcd.Index] = acc
+
+			// Start a tool_use content block
+			contentBlockIndex++
+			acc.blockIndex = contentBlockIndex
+			writeAnthropicEvent(writer, flusher, canFlush, "content_block_start", anthropic.ContentBlockStartEvent{
+				Type:  "content_block_start",
+				Index: contentBlockIndex,
+				ContentBlock: anthropic.ContentBlock{
+					Type: "tool_use",
+					ID:   tcd.ID,
+					Name: tcd.Function.Name,
+				},
+			})
+		}
+
+		if tcd.Function.Arguments != "" {
+			acc.arguments.WriteString(tcd.Function.Arguments)
 			writeAnthropicEvent(writer, flusher, canFlush, "content_block_delta", anthropic.ContentBlockDeltaEvent{
 				Type:  "content_block_delta",
-				Index: contentBlockIndex,
+				Index: acc.blockIndex,
 				Delta: anthropic.DeltaBlock{
-					Type: "text_delta",
-					Text: choice.Delta.Content,
+					Type: "input_json_delta",
+					Text: tcd.Function.Arguments,
 				},
 			})
 			totalOutputTokens++
 		}
+	}
 
-		// If there's a role in the delta (first chunk), skip - we already sent message_start
-		// If there's a finish_reason, close up the stream
-		if choice.FinishReason != nil {
-			// Close content block if started
-			if contentBlockStarted {
-				writeAnthropicEvent(writer, flusher, canFlush, "content_block_stop", anthropic.ContentBlockStopEvent{
-					Type:  "content_block_stop",
-					Index: contentBlockIndex,
-				})
-			}
-
-			// Map finish_reason to stop_reason
-			stopReason := mapFinishReason(choice.FinishReason)
-
-			// Emit message_delta with stop_reason
-			writeAnthropicEvent(writer, flusher, canFlush, "message_delta", anthropic.MessageDeltaEvent{
-				Type: "message_delta",
-				Delta: anthropic.MessageDelta{
-					StopReason: stopReason,
-				},
-				Usage: anthropic.DeltaUsage{
-					OutputTokens: totalOutputTokens,
-				},
-			})
-
-			// Emit message_stop
-			writeAnthropicEvent(writer, flusher, canFlush, "message_stop", anthropic.MessageStopEvent{
-				Type: "message_stop",
+	// If there's a finish_reason, close up the stream
+	if choice.FinishReason != nil {
+		// Close text content block if started
+		if contentBlockStarted {
+			writeAnthropicEvent(writer, flusher, canFlush, "content_block_stop", anthropic.ContentBlockStopEvent{
+				Type:  "content_block_stop",
+				Index: contentBlockIndex,
 			})
 		}
+
+		// Close any accumulated tool call content blocks
+		for _, acc := range toolCallAccumulators {
+			writeAnthropicEvent(writer, flusher, canFlush, "content_block_stop", anthropic.ContentBlockStopEvent{
+				Type:  "content_block_stop",
+				Index: acc.blockIndex,
+			})
+		}
+
+		// Map finish_reason to stop_reason
+		stopReason := mapFinishReason(choice.FinishReason)
+
+		// Emit message_delta with stop_reason
+		writeAnthropicEvent(writer, flusher, canFlush, "message_delta", anthropic.MessageDeltaEvent{
+			Type: "message_delta",
+			Delta: anthropic.MessageDelta{
+				StopReason: stopReason,
+			},
+			Usage: anthropic.DeltaUsage{
+				OutputTokens: totalOutputTokens,
+			},
+		})
+
+		// Emit message_stop
+		writeAnthropicEvent(writer, flusher, canFlush, "message_stop", anthropic.MessageStopEvent{
+			Type: "message_stop",
+		})
+	}
 
 		// Track usage if present in the final chunk
 		if chunk.Usage != nil {
@@ -190,4 +236,12 @@ func mapFinishReason(reason *string) *string {
 
 func generateMessageID() string {
 	return fmt.Sprintf("msg_%d", time.Now().UnixNano())
+}
+
+// toolCallAcc accumulates streaming tool call data from multiple SSE chunks.
+type toolCallAcc struct {
+	id        string
+	name      string
+	blockIndex int
+	arguments strings.Builder
 }

@@ -153,3 +153,54 @@ func (c *OpenAIClient) StreamMessage(req *openai.ChatCompletionRequest) (io.Read
 
 	return io.NopCloser(reader), nil
 }
+
+func openAIModelsEndpoint(baseURL string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if strings.HasSuffix(baseURL, "/v1/chat/completions") {
+		baseURL = strings.TrimSuffix(baseURL, "/chat/completions")
+	}
+	if strings.HasSuffix(baseURL, "/v1") || strings.HasSuffix(baseURL, "/v1/") {
+		return strings.TrimRight(baseURL, "/") + "/models"
+	}
+	return baseURL + "/models"
+}
+
+// ListModels fetches available models from an OpenAI-compatible provider.
+func (c *OpenAIClient) ListModels() ([]string, error) {
+	endpoint := openAIModelsEndpoint(c.cfg.BaseURL)
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		return nil, fmt.Errorf("list models API error (status %d): %v", resp.StatusCode, errBody)
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode models list: %w", err)
+	}
+
+	var models []string
+	for _, m := range result.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	return models, nil
+}

@@ -68,6 +68,22 @@ func (s *Server) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleAdminReload triggers a config reload from disk.
+func (s *Server) handleAdminReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAnthropicError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
+		return
+	}
+
+	s.reloadConfigFromFile()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"message": fmt.Sprintf("Config reloaded: %d models, %d providers", len(s.cfg.Models), len(s.cfg.Providers)),
+	})
+}
+
 // MonitorConnect connects to a running API-Switch SSE endpoint and prints live events.
 func MonitorConnect(addr string) error {
 	url := fmt.Sprintf("http://localhost%s/admin/events", addr)

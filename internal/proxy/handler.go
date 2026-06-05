@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
+	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/user/api-switch/internal/config"
 	"github.com/user/api-switch/internal/monitor"
 	"github.com/user/api-switch/internal/streaming"
@@ -17,9 +20,11 @@ import (
 // Server is the HTTP proxy server for Claude Code.
 // It accepts Anthropic Messages API requests and routes them to the correct provider.
 type Server struct {
-	cfg     *config.Config
-	router  *Router
-	tracker *monitor.Tracker
+	cfg       *config.Config
+	cfgPath   string
+	router    *Router
+	tracker   *monitor.Tracker
+	mu        sync.Mutex
 }
 
 // NewServer creates a new proxy server.
@@ -33,17 +38,110 @@ func NewServer(cfg *config.Config) *Server {
 
 // Start starts the HTTP server on the given address.
 func (s *Server) Start(addr string) error {
+	s.StartWithConfigFile(addr, "")
+	return nil
+}
+
+// StartWithConfigFile starts the HTTP server with config file path for hot-reload.
+func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
+	s.cfgPath = cfgPath
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/messages", s.handleMessages)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
 	})
-	// Admin / monitoring routes
-	mux.HandleFunc("/admin/", s.handleAdminDashboard)
+	// Admin / monitoring routes (specific routes must be registered BEFORE prefix routes)
+	mux.HandleFunc("/admin/reload", s.handleAdminReload)
 	mux.HandleFunc("/admin/stats", s.handleAdminStats)
 	mux.HandleFunc("/admin/events", s.handleAdminEvents)
+	mux.HandleFunc("/admin/", s.handleAdminDashboard)
+
+	// Start file watcher for hot-reload
+	if cfgPath != "" {
+		go s.watchConfigFile(cfgPath)
+	}
+
 	return http.ListenAndServe(addr, mux)
+}
+
+// ReloadConfig reloads the config and reinitializes the router.
+func (s *Server) ReloadConfig(cfg *config.Config) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg = cfg
+	s.router.Reload(cfg)
+	log.Printf("Config reloaded: %d models, %d providers", len(cfg.Models), len(cfg.Providers))
+}
+
+// reloadConfigFromFile reloads the config from disk.
+func (s *Server) reloadConfigFromFile() {
+	if s.cfgPath == "" {
+		return
+	}
+	cfg, err := config.Load(s.cfgPath)
+	if err != nil {
+		log.Printf("Failed to reload config: %v", err)
+		return
+	}
+	s.ReloadConfig(cfg)
+}
+
+// watchConfigFile watches the config file for changes and auto-reloads.
+func (s *Server) watchConfigFile(path string) {
+	// Resolve symlinks or use the actual path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		log.Printf("Config watch: cannot resolve path: %v", err)
+		return
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("Config watch: cannot create watcher: %v", err)
+		return
+	}
+	defer watcher.Close()
+
+	// Watch the directory containing the config file
+	// (some editors write a temp file then rename it)
+	dir := filepath.Dir(absPath)
+	if err := watcher.Add(dir); err != nil {
+		log.Printf("Config watch: cannot watch %s: %v", dir, err)
+		return
+	}
+
+	log.Printf("Config watch enabled for %s", absPath)
+
+	var debounceTimer *time.Timer
+
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			// Check if the event is for our config file
+			if filepath.Base(event.Name) == filepath.Base(absPath) {
+				if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
+					// Debounce: wait 500ms after last change before reloading
+					if debounceTimer != nil {
+						debounceTimer.Stop()
+					}
+					debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
+						log.Printf("Config file changed, reloading...")
+						s.reloadConfigFromFile()
+					})
+				}
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("Config watch error: %v", err)
+		}
+	}
 }
 
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {

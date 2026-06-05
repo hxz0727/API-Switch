@@ -29,6 +29,16 @@ func NewRouter(cfg *config.Config) *Router {
 	return r
 }
 
+// Reload reinitializes the router with a new config.
+// This allows hot-reloading without restarting the server.
+func (r *Router) Reload(cfg *config.Config) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cfg = cfg
+	r.clients = make(map[string]clientEntry)
+	r.initClients()
+}
+
 func (r *Router) initClients() {
 	for name, provCfg := range r.cfg.Providers {
 		entry := clientEntry{}

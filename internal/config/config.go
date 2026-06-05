@@ -235,3 +235,71 @@ func SetProviderValue(cfg *Config, key, value string) error {
 	cfg.Providers[provName] = prov
 	return nil
 }
+
+// ProviderTemplate defines the preset for a known provider.
+type ProviderTemplate struct {
+	Type             string
+	BaseURL          string
+	DefaultMaxTokens int
+	Models           []string
+}
+
+// KnownProviders returns a map of known provider presets.
+func KnownProviders() map[string]ProviderTemplate {
+	return map[string]ProviderTemplate{
+		"deepseek": {
+			Type:    "openai",
+			BaseURL: "https://api.deepseek.com",
+			DefaultMaxTokens: 8192,
+			Models: []string{"deepseek-chat", "deepseek-coder"},
+		},
+		"moonshot": {
+			Type:    "openai",
+			BaseURL: "https://api.moonshot.cn/v1",
+			DefaultMaxTokens: 4096,
+			Models: []string{"moonshot-v1-8k", "moonshot-v1-32k"},
+		},
+		"qwen": {
+			Type:    "openai",
+			BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+			DefaultMaxTokens: 8192,
+			Models: []string{"qwen-plus", "qwen-max", "qwen-turbo"},
+		},
+		"glm": {
+			Type:    "openai",
+			BaseURL: "https://open.bigmodel.cn/api/paas/v4",
+			DefaultMaxTokens: 4096,
+			Models: []string{"glm-4-flash", "glm-4-plus"},
+		},
+		"kimi": {
+			Type:    "openai",
+			BaseURL: "https://api.moonshot.cn/v1",
+			DefaultMaxTokens: 4096,
+			Models: []string{"kimi-latest"},
+		},
+		"yi": {
+			Type:    "openai",
+			BaseURL: "https://api.lingyiwanwu.com/v1",
+			DefaultMaxTokens: 4096,
+			Models: []string{"yi-lightning", "yi-medium"},
+		},
+		"step": {
+			Type:    "openai",
+			BaseURL: "https://api.stepfun.com/v1",
+			DefaultMaxTokens: 8192,
+			Models: []string{"step-1-8k", "step-1-32k"},
+		},
+		"ernie": {
+			Type:    "openai",
+			BaseURL: "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat",
+			DefaultMaxTokens: 2048,
+			Models: []string{"ernie-4.0", "ernie-3.5"},
+		},
+		"hunyuan": {
+			Type:    "openai",
+			BaseURL: "https://api.hunyuan.cloud.tencent.com/v1",
+			DefaultMaxTokens: 4096,
+			Models: []string{"hunyuan-lite", "hunyuan-standard"},
+		},
+	}
+}

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -24,15 +25,38 @@ func ConvertOpenAIToAnthropic(oaiResp *openai.ChatCompletionResponse, requestedM
 	choice := oaiResp.Choices[0]
 
 	// Build content blocks
-	content := []anthropic.ContentBlock{
-		{
+	var content []anthropic.ContentBlock
+
+	// Add text content if present
+	if choice.Message.Content != "" {
+		content = append(content, anthropic.ContentBlock{
 			Type: "text",
 			Text: choice.Message.Content,
-		},
+		})
+	}
+
+	// Convert tool_calls to tool_use content blocks
+	for _, tc := range choice.Message.ToolCalls {
+		// Parse arguments as JSON if possible, or keep as raw string
+		var input json.RawMessage
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+			input = json.RawMessage(fmt.Sprintf("%q", tc.Function.Arguments))
+		}
+		content = append(content, anthropic.ContentBlock{
+			Type:  "tool_use",
+			ID:    tc.ID,
+			Name:  tc.Function.Name,
+			Input: input,
+		})
 	}
 
 	// Map finish_reason -> stop_reason
 	stopReason := mapFinishReason(choice.FinishReason)
+	// If tool_calls present, override stop_reason
+	if len(choice.Message.ToolCalls) > 0 {
+		sr := "tool_use"
+		stopReason = &sr
+	}
 
 	return &anthropic.MessagesResponse{
 		ID:         oaiResp.ID,
@@ -55,9 +79,9 @@ func mapFinishReason(reason *string) *string {
 		return &s
 	}
 	mapping := map[string]string{
-		"stop":          "end_turn",
-		"length":        "max_tokens",
-		"tool_calls":    "tool_use",
+		"stop":           "end_turn",
+		"length":         "max_tokens",
+		"tool_calls":     "tool_use",
 		"content_filter": "end_turn",
 	}
 	if mapped, ok := mapping[*reason]; ok {

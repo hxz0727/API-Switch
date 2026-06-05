@@ -10,12 +10,43 @@ type ChatCompletionRequest struct {
 	Stop        []string  `json:"stop,omitempty"`
 	Stream      bool      `json:"stream,omitempty"`
 	N           *int      `json:"n,omitempty"`
+	Tools       []Tool    `json:"tools,omitempty"`
+	ToolChoice  interface{} `json:"tool_choice,omitempty"`
+}
+
+// Tool represents a tool definition in OpenAI format.
+type Tool struct {
+	Type     string      `json:"type"`
+	Function FunctionDef `json:"function"`
+}
+
+// FunctionDef represents a function definition in OpenAI format.
+type FunctionDef struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Parameters  interface{} `json:"parameters,omitempty"`
 }
 
 // Message represents a single message in the conversation.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string      `json:"role"`
+	Content    string      `json:"content"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
+	Name       string      `json:"name,omitempty"`
+}
+
+// ToolCall represents a tool call in an assistant message.
+type ToolCall struct {
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	Function ToolCallFunc   `json:"function"`
+}
+
+// ToolCallFunc represents the function details in a tool call.
+type ToolCallFunc struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ChatCompletionResponse represents an OpenAI Chat Completion API response.
@@ -61,8 +92,23 @@ type ChunkChoice struct {
 
 // Delta represents the delta content in a streaming chunk.
 type Delta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role      string     `json:"role,omitempty"`
+	Content   string     `json:"content,omitempty"`
+	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+// ToolCallDelta represents a tool call delta in a streaming chunk.
+type ToolCallDelta struct {
+	Index    int              `json:"index"`
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function *ToolCallFuncDelta `json:"function,omitempty"`
+}
+
+// ToolCallFuncDelta represents the function delta in a tool call.
+type ToolCallFuncDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 // ErrorResponse represents an OpenAI-compatible error response.

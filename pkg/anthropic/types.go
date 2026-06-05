@@ -4,14 +4,24 @@ import "encoding/json"
 
 // MessagesRequest represents an Anthropic Messages API request.
 type MessagesRequest struct {
-	Model         string    `json:"model"`
-	Messages      []Message `json:"messages"`
-	System        json.RawMessage `json:"system,omitempty"`
-	MaxTokens     int       `json:"max_tokens"`
-	Temperature   *float64  `json:"temperature,omitempty"`
-	TopP          *float64  `json:"top_p,omitempty"`
-	StopSequences []string  `json:"stop_sequences,omitempty"`
-	Stream        bool      `json:"stream,omitempty"`
+	Model         string              `json:"model"`
+	Messages      []Message           `json:"messages"`
+	System        json.RawMessage     `json:"system,omitempty"`
+	MaxTokens     int                 `json:"max_tokens"`
+	Temperature   *float64            `json:"temperature,omitempty"`
+	TopP          *float64            `json:"top_p,omitempty"`
+	TopK          *int                `json:"top_k,omitempty"`
+	StopSequences []string            `json:"stop_sequences,omitempty"`
+	Stream        bool                `json:"stream,omitempty"`
+	Tools         []ToolDefinition    `json:"tools,omitempty"`
+	ToolChoice    json.RawMessage     `json:"tool_choice,omitempty"`
+}
+
+// ToolDefinition describes a tool available to the model.
+type ToolDefinition struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 }
 
 // Message represents a single message in the conversation.
@@ -33,10 +43,25 @@ type MessagesResponse struct {
 	Usage        ResponseUsage  `json:"usage"`
 }
 
-// ContentBlock represents a content block in the response.
+// ContentBlock represents a content block in a request or response.
 type ContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type   string          `json:"type"`
+	Text   string          `json:"text,omitempty"`
+	ID     string          `json:"id,omitempty"`     // tool_use id
+	Name   string          `json:"name,omitempty"`   // tool_use name
+	Input  json.RawMessage `json:"input,omitempty"`  // tool_use input
+	Source *ImageSource    `json:"source,omitempty"` // image source
+	// For tool_result in requests
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	IsError   *bool           `json:"is_error,omitempty"`
+}
+
+// ImageSource represents an image source in a content block.
+type ImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 // ResponseUsage represents token usage in the response.

@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/user/api-switch/internal/config"
+	"github.com/user/api-switch/internal/logutil"
+	"github.com/user/api-switch/internal/provider"
 	"github.com/user/api-switch/internal/proxy"
 )
 
@@ -30,6 +33,8 @@ func main() {
 	}
 	serveCmd.Flags().IntVarP(&port, "port", "p", 0, "proxy server port (overrides config)")
 	serveCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
+	serveCmd.Flags().CountP("verbose", "v", "Verbose output (-v for more info, -vv for debug)")
+	serveCmd.Flags().BoolP("quiet", "q", false, "Suppress all non-error output")
 
 	// use command - switch the active model in Claude Code
 	useCmd := &cobra.Command{
@@ -91,12 +96,33 @@ Examples:
 			Args:  cobra.ExactArgs(1),
 			RunE:  runModelRemove,
 		},
+		&cobra.Command{
+			Use:   "import <provider>",
+			Short: "Auto-import all available models from a provider",
+			Long: `Query an OpenAI-compatible provider's /v1/models endpoint to
+discover available models and add them to the routing table.
+
+Examples:
+  api-switch model import deepseek
+  api-switch model import openai`,
+			Args: cobra.ExactArgs(1),
+			RunE: runModelImport,
+		},
 	)
 
 	// provider command
 	providerCmd := &cobra.Command{
 		Use:   "provider",
 		Short: "Manage providers",
+		Long: `Manage provider configurations.
+
+Supports built-in presets for popular providers:
+  deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan
+
+Examples:
+  api-switch provider list                          List all configured providers
+  api-switch provider add deepseek --key sk-xxx     Add DeepSeek with API key
+  api-switch provider add qwen --key sk-xxx         Add Qwen (DashScope) with API key`,
 	}
 	providerCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "config file path")
 	providerCmd.AddCommand(
@@ -106,6 +132,42 @@ Examples:
 			RunE:  runProviderList,
 		},
 	)
+
+	// provider add subcommand
+	providerAddCmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add a provider (supports built-in presets)",
+		Long: `Add a provider by name. If it matches a known provider preset
+(deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan),
+the base URL and defaults are filled in automatically.
+
+You only need to provide the API key via --key flag.
+
+Known providers and their defaults:
+  deepseek  -> https://api.deepseek.com               (models: deepseek-chat, deepseek-coder)
+  moonshot  -> https://api.moonshot.cn/v1             (models: moonshot-v1-8k, moonshot-v1-32k)
+  qwen      -> https://dashscope.aliyuncs.com/v1       (models: qwen-plus, qwen-max, qwen-turbo)
+  glm       -> https://open.bigmodel.cn/api/paas/v4   (models: glm-4-flash, glm-4-plus)
+  kimi      -> https://api.moonshot.cn/v1             (models: kimi-latest)
+  yi        -> https://api.lingyiwanwu.com/v1         (models: yi-lightning, yi-medium)
+  step      -> https://api.stepfun.com/v1             (models: step-1-8k, step-1-32k)
+  ernie     -> https://aip.baidubce.com/...            (models: ernie-4.0, ernie-3.5)
+  hunyuan   -> https://api.hunyuan.cloud.tencent.com/v1 (models: hunyuan-lite, hunyuan-standard)
+
+If the name does not match a known provider, you must also provide --url and --type.
+
+Examples:
+  api-switch provider add deepseek --key sk-xxx          # Known preset
+  api-switch provider add qwen --key sk-xxx               # Known preset
+  api-switch provider add my-custom --url https://... --type openai --key sk-xxx`,
+		Args: cobra.ExactArgs(1),
+		RunE: runProviderAdd,
+	}
+	providerAddCmd.Flags().String("key", "", "API key for the provider (required)")
+	providerAddCmd.Flags().String("url", "", "Base URL (optional for known providers)")
+	providerAddCmd.Flags().String("type", "", "Provider type: anthropic or openai (optional for known providers)")
+	providerAddCmd.Flags().StringSlice("models", nil, "Additional models to import (comma-separated)")
+	providerCmd.AddCommand(providerAddCmd)
 
 	// config command
 	configCmd := &cobra.Command{
@@ -365,6 +427,21 @@ func runGenerateClaudeConfig(cmd *cobra.Command, args []string) error {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
+	// Apply log level
+	verbose, _ := cmd.Flags().GetCount("verbose")
+	quiet, _ := cmd.Flags().GetBool("quiet")
+	switch {
+	case quiet:
+		logutil.SetLevel(logutil.LevelError)
+		log.SetOutput(io.Discard) // suppress standard log output
+	case verbose >= 2:
+		logutil.SetLevel(logutil.LevelDebug)
+	case verbose >= 1:
+		logutil.SetLevel(logutil.LevelInfo)
+	default:
+		logutil.SetLevel(logutil.LevelInfo)
+	}
+
 	cfg, _, err := loadConfig()
 	if err != nil {
 		return err
@@ -381,9 +458,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	srv := proxy.NewServer(cfg)
 	addr := fmt.Sprintf(":%d", p)
-	log.Printf("Starting API-Switch proxy on %s", addr)
-	log.Printf("Configured models: %d, providers: %d", len(cfg.Models), len(cfg.Providers))
-	return srv.Start(addr)
+	logutil.Info("Starting API-Switch proxy on %s", addr)
+	logutil.Info("Configured models: %d, providers: %d", len(cfg.Models), len(cfg.Providers))
+	configPath := cfgPath
+	if configPath == "" {
+		configPath = config.DefaultConfigPath()
+	}
+	return srv.StartWithConfigFile(addr, configPath)
 }
 
 func runModelList(cmd *cobra.Command, args []string) error {
@@ -454,10 +535,70 @@ func runModelRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runModelImport(cmd *cobra.Command, args []string) error {
+	providerName := args[0]
+	cfg, path, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	provCfg, ok := cfg.Providers[providerName]
+	if !ok {
+		return fmt.Errorf("provider %q not found in config", providerName)
+	}
+	if provCfg.Type != "openai" {
+		return fmt.Errorf("model import is only supported for OpenAI-compatible providers (got type %q)", provCfg.Type)
+	}
+
+	client := provider.NewOpenAIClient(&provCfg)
+	models, err := client.ListModels()
+	if err != nil {
+		return fmt.Errorf("failed to list models from %q: %w", providerName, err)
+	}
+
+	if len(models) == 0 {
+		fmt.Printf("No models returned by %q.\n", providerName)
+		return nil
+	}
+
+	imported := 0
+	for _, m := range models {
+		if _, exists := cfg.Models[m]; !exists {
+			cfg.Models[m] = config.ModelConfig{
+				Provider:      providerName,
+				ModelOverride: m,
+			}
+			imported++
+		}
+	}
+
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("Imported %d new models from provider %q:\n", imported, providerName)
+	for _, m := range models {
+		if cfg.Models[m].Provider == providerName {
+			fmt.Printf("  - %s\n", m)
+		}
+	}
+	return nil
+}
+
 func runProviderList(cmd *cobra.Command, args []string) error {
 	cfg, _, err := loadConfig()
 	if err != nil {
 		return err
+	}
+
+	if len(cfg.Providers) == 0 {
+		fmt.Println("No providers configured.")
+		fmt.Println()
+		fmt.Println("Add a provider with:")
+		fmt.Println("  api-switch provider add deepseek --key sk-xxx")
+		fmt.Println("  api-switch provider add qwen --key sk-xxx")
+		fmt.Println("  api-switch provider add openai --url https://api.openai.com --type openai --key sk-xxx")
+		return nil
 	}
 
 	fmt.Printf("%-20s %-12s %s\n", "PROVIDER", "TYPE", "BASE URL")
@@ -469,6 +610,103 @@ func runProviderList(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("%-20s %-12s %s (%s)\n", name, pcfg.Type, pcfg.BaseURL, keyStatus)
 	}
+	return nil
+}
+
+func runProviderAdd(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	key, _ := cmd.Flags().GetString("key")
+	url, _ := cmd.Flags().GetString("url")
+	provType, _ := cmd.Flags().GetString("type")
+	addModels, _ := cmd.Flags().GetStringSlice("models")
+
+	cfg, configPath, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	// Check if provider already exists
+	if _, ok := cfg.Providers[name]; ok {
+		return fmt.Errorf("provider %q already exists; use `api-switch config set providers.%s.<field> <value>` to update it", name, name)
+	}
+
+	// Check for known provider preset
+	known := config.KnownProviders()
+	tmpl, isKnown := known[name]
+
+	if isKnown {
+		if url == "" {
+			url = tmpl.BaseURL
+		}
+		if provType == "" {
+			provType = tmpl.Type
+		}
+	}
+
+	if key == "" {
+		return fmt.Errorf("--key is required for provider %q", name)
+	}
+	if url == "" {
+		return fmt.Errorf("--url is required (no known preset for provider %q)", name)
+	}
+	if provType == "" {
+		return fmt.Errorf("--type is required (must be 'anthropic' or 'openai')")
+	}
+	if provType != "anthropic" && provType != "openai" {
+		return fmt.Errorf("invalid type %q; must be 'anthropic' or 'openai'", provType)
+	}
+
+	defaultMaxTokens := 1024
+	if isKnown && tmpl.DefaultMaxTokens > 0 {
+		defaultMaxTokens = tmpl.DefaultMaxTokens
+	}
+
+	cfg.Providers[name] = config.ProviderConfig{
+		Type:             provType,
+		APIKey:           key,
+		BaseURL:          url,
+		DefaultMaxTokens: defaultMaxTokens,
+	}
+
+	if err := config.Save(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("Added provider %q (%s)\n", name, provType)
+	fmt.Printf("  API Key:   %s\n", maskKey(key))
+	fmt.Printf("  Base URL:  %s\n", url)
+
+	// Suggest adding models
+	if isKnown && len(tmpl.Models) > 0 {
+		allModels := append([]string{}, tmpl.Models...)
+		allModels = append(allModels, addModels...)
+		fmt.Println()
+		fmt.Println("Suggested models:")
+		for _, m := range allModels {
+			fmt.Printf("  - %s\n", m)
+		}
+		fmt.Println()
+		fmt.Println("Add models with:")
+		fmt.Printf("  api-switch model add <name> %s\n", name)
+		fmt.Printf("  api-switch model import %s    (auto-import from API)\n", name)
+	}
+	if len(addModels) > 0 {
+		for _, m := range addModels {
+			cfg.Models[m] = config.ModelConfig{
+				Provider:      name,
+				ModelOverride: m,
+			}
+		}
+		if err := config.Save(configPath, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("Added %d model(s) to routing table.\n", len(addModels))
+	}
+
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Printf("  1. Switch to a model:  api-switch use <model>\n")
+	fmt.Printf("  2. Start the proxy:    api-switch serve\n")
 	return nil
 }
 
