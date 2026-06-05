@@ -102,6 +102,13 @@ func Save(path string, cfg *Config) error {
 
 // Validate checks that the config is usable.
 func (c *Config) Validate() error {
+	if len(c.Providers) == 0 {
+		return fmt.Errorf("no providers configured; add one with `api-switch provider add <name> --key <key>`")
+	}
+	if len(c.Models) == 0 {
+		return fmt.Errorf("no models configured; add one with `api-switch model add <name> <provider>`")
+	}
+
 	for modelName, modelCfg := range c.Models {
 		prov, ok := c.Providers[modelCfg.Provider]
 		if !ok {
@@ -111,6 +118,20 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("API key for provider %q (used by model %q) is not set; use `api-switch config set %s.api_key <key>`", modelCfg.Provider, modelName, modelCfg.Provider)
 		}
 	}
+
+	for provName, prov := range c.Providers {
+		if prov.Type != "anthropic" && prov.Type != "openai" {
+			return fmt.Errorf("provider %q has invalid type %q (must be 'anthropic' or 'openai')", provName, prov.Type)
+		}
+		if prov.BaseURL == "" {
+			return fmt.Errorf("provider %q has no base_url; set it with `api-switch config set providers.%s.base_url <url>`", provName, provName)
+		}
+	}
+
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
+		return fmt.Errorf("invalid server port %d; must be between 1 and 65535", c.Server.Port)
+	}
+
 	return nil
 }
 

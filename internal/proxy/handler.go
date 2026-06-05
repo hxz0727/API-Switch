@@ -1,8 +1,10 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -36,12 +38,6 @@ func NewServer(cfg *config.Config) *Server {
 	}
 }
 
-// Start starts the HTTP server on the given address.
-func (s *Server) Start(addr string) error {
-	s.StartWithConfigFile(addr, "")
-	return nil
-}
-
 // StartWithConfigFile starts the HTTP server with config file path for hot-reload.
 func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 	s.cfgPath = cfgPath
@@ -49,8 +45,13 @@ func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/messages", s.handleMessages)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":    "ok",
+			"models":    len(s.cfg.Models),
+			"providers": len(s.cfg.Providers),
+			"requests":  s.tracker.Stats()["total_requests"],
+		})
 	})
 	// Admin / monitoring routes (specific routes must be registered BEFORE prefix routes)
 	mux.HandleFunc("/admin/reload", s.handleAdminReload)
@@ -197,9 +198,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	switch route.ProviderType {
 	case "anthropic":
-		s.handleAnthropic(w, &antReq, route)
+		s.handleAnthropic(r.Context(), w, &antReq, route)
 	case "openai":
-		s.handleOpenAI(w, &antReq, route)
+		s.handleOpenAI(r.Context(), w, &antReq, route)
 	default:
 		writeAnthropicError(w, http.StatusInternalServerError, "unknown_provider_type",
 			fmt.Sprintf("provider type %q is not supported", route.ProviderType))
@@ -211,13 +212,22 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	s.tracker.Record(ev)
 }
 
+// closeOnCancel closes the given Closer when the context is cancelled.
+// Used to abort upstream reads when the client disconnects.
+func closeOnCancel(ctx context.Context, closer io.Closer) {
+	go func() {
+		<-ctx.Done()
+		closer.Close()
+	}()
+}
+
 // handleAnthropic handles requests for Anthropic models (direct passthrough).
-func (s *Server) handleAnthropic(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
+func (s *Server) handleAnthropic(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
 	// Override model name if mapped
 	antReq.Model = route.ActualModel
 
 	if antReq.Stream {
-		s.handleAnthropicStreaming(w, antReq, route)
+		s.handleAnthropicStreaming(ctx, w, antReq, route)
 	} else {
 		s.handleAnthropicNonStreaming(w, antReq, route)
 	}
@@ -232,10 +242,12 @@ func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anth
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(antResp)
+	if err := json.NewEncoder(w).Encode(antResp); err != nil {
+		logutil.Error("Anthropic response encode error: %v", err)
+	}
 }
 
-func (s *Server) handleAnthropicStreaming(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
+func (s *Server) handleAnthropicStreaming(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
 	respBody, err := route.Anthropic.StreamMessage(antReq)
 	if err != nil {
 		logutil.Error("Anthropic streaming error: %v", err)
@@ -243,6 +255,9 @@ func (s *Server) handleAnthropicStreaming(w http.ResponseWriter, antReq *anthrop
 		return
 	}
 	defer respBody.Close()
+
+	// Close upstream body when client disconnects
+	closeOnCancel(ctx, respBody)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -255,7 +270,7 @@ func (s *Server) handleAnthropicStreaming(w http.ResponseWriter, antReq *anthrop
 }
 
 // handleOpenAI handles requests for OpenAI-protocol models (protocol conversion).
-func (s *Server) handleOpenAI(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
+func (s *Server) handleOpenAI(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
 	// Get default max tokens from route (populated by router under lock)
 	defaultMaxTokens := route.DefaultMaxTokens
 
@@ -271,7 +286,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, antReq *anthropic.MessagesR
 	}
 
 	if antReq.Stream {
-		s.handleOpenAIStreaming(w, oaiReq, route, antReq.Model)
+		s.handleOpenAIStreaming(ctx, w, oaiReq, route, antReq.Model)
 	} else {
 		s.handleOpenAINonStreaming(w, oaiReq, route, antReq.Model)
 	}
@@ -288,10 +303,12 @@ func (s *Server) handleOpenAINonStreaming(w http.ResponseWriter, oaiReq *openai.
 	// Convert OpenAI response → Anthropic response
 	antResp := ConvertOpenAIToAnthropic(oaiResp, requestedModel)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(antResp)
+	if err := json.NewEncoder(w).Encode(antResp); err != nil {
+		logutil.Error("OpenAI response encode error: %v", err)
+	}
 }
 
-func (s *Server) handleOpenAIStreaming(w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string) {
+func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string) {
 	respBody, err := route.OpenAI.StreamMessage(oaiReq)
 	if err != nil {
 		logutil.Error("OpenAI streaming error: %v", err)
@@ -299,6 +316,9 @@ func (s *Server) handleOpenAIStreaming(w http.ResponseWriter, oaiReq *openai.Cha
 		return
 	}
 	defer respBody.Close()
+
+	// Close upstream body when client disconnects
+	closeOnCancel(ctx, respBody)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -338,5 +358,7 @@ func writeAnthropicError(w http.ResponseWriter, status int, errType, message str
 	resp.Error.Message = message
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logutil.Error("Failed to write error response: %v", err)
+	}
 }

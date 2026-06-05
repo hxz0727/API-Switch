@@ -110,15 +110,3 @@ type ToolCallFuncDelta struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 }
-
-// ErrorResponse represents an OpenAI-compatible error response.
-type ErrorResponse struct {
-	Error ErrorBody `json:"error"`
-}
-
-// ErrorBody represents the error details.
-type ErrorBody struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code,omitempty"`
-}

@@ -51,7 +51,7 @@ func ConvertOpenAIToAnthropic(oaiResp *openai.ChatCompletionResponse, requestedM
 	}
 
 	// Map finish_reason -> stop_reason
-	stopReason := mapFinishReason(choice.FinishReason)
+	stopReason := mapOpenAIFinishReason(choice.FinishReason)
 	// If tool_calls present, override stop_reason
 	if len(choice.Message.ToolCalls) > 0 {
 		sr := "tool_use"
@@ -72,8 +72,8 @@ func ConvertOpenAIToAnthropic(oaiResp *openai.ChatCompletionResponse, requestedM
 	}
 }
 
-// mapFinishReason maps an OpenAI finish_reason to an Anthropic stop_reason.
-func mapFinishReason(reason *string) *string {
+// mapOpenAIFinishReason maps an OpenAI finish_reason to an Anthropic stop_reason.
+func mapOpenAIFinishReason(reason *string) *string {
 	if reason == nil {
 		s := "end_turn"
 		return &s

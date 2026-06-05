@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/api-switch/internal/logutil"
 	"github.com/user/api-switch/internal/monitor"
 )
 
@@ -27,7 +28,9 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logutil.Warn("Failed to encode stats response: %v", err)
+	}
 }
 
 func (s *Server) handleAdminEvents(w http.ResponseWriter, r *http.Request) {
@@ -78,10 +81,12 @@ func (s *Server) handleAdminReload(w http.ResponseWriter, r *http.Request) {
 	s.reloadConfigFromFile()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "ok",
 		"message": fmt.Sprintf("Config reloaded: %d models, %d providers", len(s.cfg.Models), len(s.cfg.Providers)),
-	})
+	}); err != nil {
+		logutil.Warn("Failed to encode reload response: %v", err)
+	}
 }
 
 // MonitorConnect connects to a running API-Switch SSE endpoint and prints live events.
