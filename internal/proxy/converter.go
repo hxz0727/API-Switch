@@ -84,16 +84,34 @@ func convertContentBlocks(content json.RawMessage) (string, []openai.ToolCall) {
 func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, defaultMaxTokens int) *openai.ChatCompletionRequest {
 	var messages []openai.Message
 
-	// If Anthropic request has a system field, prepend it as a system message
+	// Collect all system content: from top-level "system" field + any "system"-role messages
+	var systemParts []string
 	if systemContent := contentToString(antReq.System); systemContent != "" {
+		systemParts = append(systemParts, systemContent)
+	}
+
+	// Separate system messages from conversation messages
+	var conversationMsgs []anthropic.Message
+	for _, msg := range antReq.Messages {
+		if msg.Role == "system" {
+			if sc := contentToString(msg.Content); sc != "" {
+				systemParts = append(systemParts, sc)
+			}
+		} else {
+			conversationMsgs = append(conversationMsgs, msg)
+		}
+	}
+
+	// Place combined system content at the beginning (required by most OpenAI-compatible APIs)
+	if len(systemParts) > 0 {
 		messages = append(messages, openai.Message{
 			Role:    "system",
-			Content: systemContent,
+			Content: strings.Join(systemParts, "\n"),
 		})
 	}
 
-	// Copy conversation messages, handling various content types
-	for _, msg := range antReq.Messages {
+	// Copy conversation messages (system messages already merged above)
+	for _, msg := range conversationMsgs {
 		oaiMsg := openai.Message{
 			Role: msg.Role,
 		}
@@ -188,11 +206,34 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 		}
 	}
 
-	// tool_choice
+	// tool_choice — convert Anthropic format to OpenAI format
+	// Anthropic: {"type": "auto"} | {"type": "any"} | {"type": "tool", "name": "xxx"}
+	// OpenAI:   "auto" | "required" | "none" | {"type": "function", "function": {"name": "xxx"}}
 	if antReq.ToolChoice != nil {
-		var choiceRaw interface{}
-		if err := json.Unmarshal(antReq.ToolChoice, &choiceRaw); err == nil {
-			req.ToolChoice = choiceRaw
+		var choice struct {
+			Type string `json:"type"`
+			Name string `json:"name,omitempty"`
+		}
+		if err := json.Unmarshal(antReq.ToolChoice, &choice); err == nil && choice.Type != "" {
+			switch choice.Type {
+			case "auto":
+				req.ToolChoice = "auto"
+			case "any":
+				req.ToolChoice = "required"
+			case "tool":
+				if choice.Name != "" {
+					req.ToolChoice = map[string]interface{}{
+						"type": "function",
+						"function": map[string]string{
+							"name": choice.Name,
+						},
+					}
+				} else {
+					req.ToolChoice = "required"
+				}
+			default:
+				req.ToolChoice = "auto"
+			}
 		}
 	}
 
