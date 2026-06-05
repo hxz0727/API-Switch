@@ -3,7 +3,6 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/user/api-switch/internal/config"
+	"github.com/user/api-switch/internal/logutil"
 	"github.com/user/api-switch/internal/monitor"
 	"github.com/user/api-switch/internal/streaming"
 	"github.com/user/api-switch/pkg/anthropic"
@@ -72,7 +72,7 @@ func (s *Server) ReloadConfig(cfg *config.Config) {
 	defer s.mu.Unlock()
 	s.cfg = cfg
 	s.router.Reload(cfg)
-	log.Printf("Config reloaded: %d models, %d providers", len(cfg.Models), len(cfg.Providers))
+	logutil.Info("Config reloaded: %d models, %d providers", len(cfg.Models), len(cfg.Providers))
 }
 
 // reloadConfigFromFile reloads the config from disk.
@@ -82,7 +82,7 @@ func (s *Server) reloadConfigFromFile() {
 	}
 	cfg, err := config.Load(s.cfgPath)
 	if err != nil {
-		log.Printf("Failed to reload config: %v", err)
+		logutil.Warn("Failed to reload config: %v", err)
 		return
 	}
 	s.ReloadConfig(cfg)
@@ -93,13 +93,13 @@ func (s *Server) watchConfigFile(path string) {
 	// Resolve symlinks or use the actual path
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		log.Printf("Config watch: cannot resolve path: %v", err)
+		logutil.Warn("Config watch: cannot resolve path: %v", err)
 		return
 	}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Printf("Config watch: cannot create watcher: %v", err)
+		logutil.Warn("Config watch: cannot create watcher: %v", err)
 		return
 	}
 	defer watcher.Close()
@@ -108,11 +108,11 @@ func (s *Server) watchConfigFile(path string) {
 	// (some editors write a temp file then rename it)
 	dir := filepath.Dir(absPath)
 	if err := watcher.Add(dir); err != nil {
-		log.Printf("Config watch: cannot watch %s: %v", dir, err)
+		logutil.Warn("Config watch: cannot watch %s: %v", dir, err)
 		return
 	}
 
-	log.Printf("Config watch enabled for %s", absPath)
+	logutil.Debug("Config watch enabled for %s", absPath)
 
 	var debounceTimer *time.Timer
 
@@ -130,7 +130,7 @@ func (s *Server) watchConfigFile(path string) {
 						debounceTimer.Stop()
 					}
 					debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
-						log.Printf("Config file changed, reloading...")
+						logutil.Debug("Config file changed, reloading...")
 						s.reloadConfigFromFile()
 					})
 				}
@@ -139,7 +139,7 @@ func (s *Server) watchConfigFile(path string) {
 			if !ok {
 				return
 			}
-			log.Printf("Config watch error: %v", err)
+			logutil.Debug("Config watch error: %v", err)
 		}
 	}
 }
@@ -177,7 +177,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	// Route the model
 	route, err := s.router.Route(antReq.Model)
 	if err != nil {
-		log.Printf("Model not found in routing table: %q", antReq.Model)
+		logutil.Error("Model not found in routing table: %q", antReq.Model)
 		writeAnthropicError(w, http.StatusNotFound, "not_found",
 			fmt.Sprintf("Model %q is not configured. Use `api-switch model add %s <provider>` to add it, then `api-switch use %s` to switch.", antReq.Model, antReq.Model, antReq.Model))
 		ev.Status = "error"
@@ -191,7 +191,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	ev.Provider = route.ProviderName
 	ev.ProviderType = route.ProviderType
 
-	log.Printf("Request model=%s provider=%s type=%s actualModel=%s stream=%v",
+	logutil.Info("Request model=%s provider=%s type=%s actualModel=%s stream=%v",
 		antReq.Model, route.ProviderName, route.ProviderType, route.ActualModel, antReq.Stream)
 
 	switch route.ProviderType {
@@ -225,7 +225,7 @@ func (s *Server) handleAnthropic(w http.ResponseWriter, antReq *anthropic.Messag
 func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
 	antResp, err := route.Anthropic.SendMessage(antReq)
 	if err != nil {
-		log.Printf("Anthropic API error: %v", err)
+		logutil.Error("Anthropic API error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
 		return
 	}
@@ -237,7 +237,7 @@ func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anth
 func (s *Server) handleAnthropicStreaming(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
 	respBody, err := route.Anthropic.StreamMessage(antReq)
 	if err != nil {
-		log.Printf("Anthropic streaming error: %v", err)
+		logutil.Error("Anthropic streaming error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
 		return
 	}
@@ -249,7 +249,7 @@ func (s *Server) handleAnthropicStreaming(w http.ResponseWriter, antReq *anthrop
 
 	flusher, canFlush := w.(http.Flusher)
 	if err := streaming.AnthropicPassthroughStream(respBody, w, flusher, canFlush); err != nil {
-		log.Printf("Anthropic passthrough error: %v", err)
+		logutil.Error("Anthropic passthrough error: %v", err)
 	}
 }
 
@@ -260,14 +260,14 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, antReq *anthropic.MessagesR
 	defaultMaxTokens := provCfg.DefaultMaxTokens
 
 	// Debug: log the raw messages and system field from Claude Code
-	log.Printf("DEBUG Anthropic request: model=%q system=%q messages=%+v", antReq.Model, string(antReq.System), antReq.Messages)
+	logutil.Debug("DEBUG Anthropic request: model=%q system=%q messages=%+v", antReq.Model, string(antReq.System), antReq.Messages)
 
 	// Convert Anthropic request → OpenAI request
 	oaiReq := ConvertAnthropicToOpenAI(antReq, route.ActualModel, defaultMaxTokens)
 
 	// Debug: log what was converted
 	for i, msg := range oaiReq.Messages {
-		log.Printf("DEBUG OAI msg[%d]: role=%q content=%q", i, msg.Role, msg.Content[:min(len(msg.Content), 200)])
+		logutil.Debug("DEBUG OAI msg[%d]: role=%q content=%q", i, msg.Role, msg.Content[:min(len(msg.Content), 200)])
 	}
 
 	if antReq.Stream {
@@ -280,7 +280,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, antReq *anthropic.MessagesR
 func (s *Server) handleOpenAINonStreaming(w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string) {
 	oaiResp, err := route.OpenAI.SendMessage(oaiReq)
 	if err != nil {
-		log.Printf("OpenAI API error: %v", err)
+		logutil.Error("OpenAI API error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
 		return
 	}
@@ -294,7 +294,7 @@ func (s *Server) handleOpenAINonStreaming(w http.ResponseWriter, oaiReq *openai.
 func (s *Server) handleOpenAIStreaming(w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string) {
 	respBody, err := route.OpenAI.StreamMessage(oaiReq)
 	if err != nil {
-		log.Printf("OpenAI streaming error: %v", err)
+		logutil.Error("OpenAI streaming error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
 		return
 	}
@@ -310,7 +310,7 @@ func (s *Server) handleOpenAIStreaming(w http.ResponseWriter, oaiReq *openai.Cha
 	inputTokens := estimateInputTokens(oaiReq)
 
 	if err := streaming.OpenAIToAnthropicStream(respBody, w, flusher, canFlush, requestedModel, inputTokens); err != nil {
-		log.Printf("OpenAI→Anthropic streaming conversion error: %v", err)
+		logutil.Error("OpenAI→Anthropic streaming conversion error: %v", err)
 	}
 }
 

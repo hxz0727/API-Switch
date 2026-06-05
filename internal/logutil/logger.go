@@ -82,7 +82,6 @@ func QuietFlag(quiet bool) Level {
 // Logger is a leveled logger that wraps Go's standard log package.
 type Logger struct {
 	logger *log.Logger
-	level  Level
 }
 
 // New creates a new leveled logger.
@@ -117,28 +116,28 @@ func Debug(format string, v ...interface{}) {
 
 // Error logs at error level.
 func (l *Logger) Error(format string, v ...interface{}) {
-	if l.level >= LevelError {
+	if GetLevel() >= LevelError {
 		l.logger.Printf("[ERROR] "+format, v...)
 	}
 }
 
 // Warn logs at warn level.
 func (l *Logger) Warn(format string, v ...interface{}) {
-	if l.level >= LevelWarn {
+	if GetLevel() >= LevelWarn {
 		l.logger.Printf("[WARN] "+format, v...)
 	}
 }
 
 // Info logs at info level.
 func (l *Logger) Info(format string, v ...interface{}) {
-	if l.level >= LevelInfo {
+	if GetLevel() >= LevelInfo {
 		l.logger.Printf("[INFO] "+format, v...)
 	}
 }
 
 // Debug logs at debug level.
 func (l *Logger) Debug(format string, v ...interface{}) {
-	if l.level >= LevelDebug {
+	if GetLevel() >= LevelDebug {
 		l.logger.Printf("[DEBUG] "+format, v...)
 	}
 }
