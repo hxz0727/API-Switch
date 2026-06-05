@@ -54,11 +54,12 @@ func (r *Router) initClients() {
 
 // RouteResult contains the routing decision for a model request.
 type RouteResult struct {
-	ProviderType string // "anthropic" or "openai"
-	ProviderName string
-	ActualModel  string
-	Anthropic    *provider.AnthropicClient
-	OpenAI       *provider.OpenAIClient
+	ProviderType     string // "anthropic" or "openai"
+	ProviderName     string
+	ActualModel      string
+	DefaultMaxTokens int
+	Anthropic        *provider.AnthropicClient
+	OpenAI           *provider.OpenAIClient
 }
 
 // Route determines which provider handles the given model.
@@ -77,11 +78,12 @@ func (r *Router) Route(model string) (*RouteResult, error) {
 	}
 
 	result := &RouteResult{
-		ProviderType: provCfg.Type,
-		ProviderName: providerName,
-		ActualModel:  actualModel,
-		Anthropic:    entry.anthropic,
-		OpenAI:       entry.openai,
+		ProviderType:     provCfg.Type,
+		ProviderName:     providerName,
+		ActualModel:      actualModel,
+		DefaultMaxTokens: provCfg.DefaultMaxTokens,
+		Anthropic:        entry.anthropic,
+		OpenAI:           entry.openai,
 	}
 
 	return result, nil

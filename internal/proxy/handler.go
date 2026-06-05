@@ -160,9 +160,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode Anthropic Messages request
+	// Decode Anthropic Messages request (limit body to 64MB)
 	var antReq anthropic.MessagesRequest
-	if err := json.NewDecoder(r.Body).Decode(&antReq); err != nil {
+	limitedBody := http.MaxBytesReader(w, r.Body, 64<<20)
+	if err := json.NewDecoder(limitedBody).Decode(&antReq); err != nil {
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		ev.Status = "error"
 		ev.Error = err.Error()
@@ -255,9 +256,8 @@ func (s *Server) handleAnthropicStreaming(w http.ResponseWriter, antReq *anthrop
 
 // handleOpenAI handles requests for OpenAI-protocol models (protocol conversion).
 func (s *Server) handleOpenAI(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
-	// Get default max tokens for this provider
-	provCfg := s.cfg.Providers[route.ProviderName]
-	defaultMaxTokens := provCfg.DefaultMaxTokens
+	// Get default max tokens from route (populated by router under lock)
+	defaultMaxTokens := route.DefaultMaxTokens
 
 	// Debug: log the raw messages and system field from Claude Code
 	logutil.Debug("DEBUG Anthropic request: model=%q system=%q messages=%+v", antReq.Model, string(antReq.System), antReq.Messages)

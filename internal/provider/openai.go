@@ -151,7 +151,17 @@ func (c *OpenAIClient) StreamMessage(req *openai.ChatCompletionRequest) (io.Read
 		return nil, fmt.Errorf("upstream API returned non-SSE response: %s", string(errBytes))
 	}
 
-	return io.NopCloser(reader), nil
+	return &streamReadCloser{Reader: reader, closer: resp.Body}, nil
+}
+
+// streamReadCloser wraps a bufio.Reader and closes the original body on Close().
+type streamReadCloser struct {
+	*bufio.Reader
+	closer io.Closer
+}
+
+func (s *streamReadCloser) Close() error {
+	return s.closer.Close()
 }
 
 func openAIModelsEndpoint(baseURL string) string {
