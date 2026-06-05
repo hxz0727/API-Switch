@@ -1,0 +1,10 @@
+# Go binary
+/api-switch
+
+# IDE
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
