@@ -31,6 +31,9 @@ if [ -z "${GOPROXY:-}" ]; then
     fi
 fi
 
+# 禁止 Go 自动下载 toolchain（避免 toolchain 下载失败）
+export GOTOOLCHAIN=local
+
 # ── 1. 检查 Go ────────────────────────────────────
 step "1/4  检查 Go 环境"
 

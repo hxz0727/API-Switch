@@ -4,8 +4,10 @@ BINARY   = api-switch
 OUTPUT   = ./$(BINARY)
 SRC      = ./cmd/api-switch/
 LDFLAGS  = -ldflags="-s -w"
-# 国内用户可设置: make build GOPROXY=https://goproxy.cn,direct
+# Go 模块代理（国内用户: make build GOPROXY=https://goproxy.cn,direct）
 GOPROXY ?= https://proxy.golang.org,direct
+# 禁止 Go 自动下载 toolchain（兼容低版本 Go，使用本地版本编译）
+export GOTOOLCHAIN=local
 
 build:
 	GOPROXY=$(GOPROXY) go build $(LDFLAGS) -o $(OUTPUT) $(SRC)
