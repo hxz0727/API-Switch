@@ -141,7 +141,28 @@ Examples:
 	genClaudeCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
 	genClaudeCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
 
-	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, genClaudeCmd)
+	// doctor command
+	doctorCmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Run diagnostics on your API-Switch configuration",
+		Long: `Run comprehensive diagnostics to identify configuration issues.
+
+Checks performed:
+  - Config file existence, permissions, and format
+  - Provider configuration completeness and validity
+  - Model routing table consistency
+  - Network connectivity to each provider
+  - Claude Code settings.json correctness
+  - Port availability
+
+Examples:
+  api-switch doctor           Run all checks
+  api-switch doctor -v        Verbose output with suggestions`,
+		RunE: runDoctor,
+	}
+	doctorCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
+
+	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, genClaudeCmd, doctorCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -508,6 +529,85 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("Then switch to a model:")
 	fmt.Println("  api-switch use gpt-4o")
 	fmt.Println("  api-switch serve")
+	return nil
+}
+
+func runDoctor(cmd *cobra.Command, args []string) error {
+	cfg, configPath, err := loadConfig()
+
+	fmt.Println()
+	fmt.Println("  API-Switch Diagnostics")
+	fmt.Println("  " + strings.Repeat("═", 50))
+	fmt.Println()
+
+	var results []config.DoctorResult
+	if err != nil {
+		// Config file doesn't exist or is invalid — still run what checks we can
+		results = config.RunDoctor(nil, configPath)
+	} else {
+		results = config.RunDoctor(cfg, configPath)
+	}
+
+	allPassed := true
+	for _, r := range results {
+		// Skip empty results
+		if len(r.Items) == 0 {
+			continue
+		}
+
+		// Print category header
+		statusSymbol := "✓"
+		switch r.Status {
+		case config.StatusPass:
+			statusSymbol = "✓"
+		case config.StatusWarn:
+			statusSymbol = "!"
+			allPassed = false
+		case config.StatusFail:
+			statusSymbol = "✗"
+			allPassed = false
+		case config.StatusInfo:
+			statusSymbol = "i"
+		}
+
+		fmt.Printf(" [%s] %s\n", statusSymbol, r.Title)
+		fmt.Println("  " + strings.Repeat("─", 48))
+
+		for _, item := range r.Items {
+			itemSymbol := "  ✓"
+			switch item.Status {
+			case config.StatusPass:
+				itemSymbol = "  ✓"
+			case config.StatusWarn:
+				itemSymbol = "  ⚠"
+			case config.StatusFail:
+				itemSymbol = "  ✗"
+			case config.StatusInfo:
+				itemSymbol = "  ·"
+			}
+			fmt.Printf("%s %s\n", itemSymbol, item.Message)
+			if item.Detail != "" {
+				fmt.Printf("    → %s\n", item.Detail)
+			}
+		}
+		fmt.Println()
+	}
+
+	if allPassed {
+		fmt.Println(" ✓ All checks passed! Your API-Switch is ready to use.")
+	} else {
+		fmt.Println(" ⚠ Some checks require attention. Review the warnings above.")
+		fmt.Println()
+		fmt.Println("Quick fixes:")
+		fmt.Println("  - Missing config:     api-switch config init")
+		fmt.Println("  - Add provider:       api-switch setup ...")
+		fmt.Println("  - Add model:          api-switch model add <name> <provider>")
+		fmt.Println("  - Switch model:       api-switch use <model>")
+		fmt.Println("  - Set Claude config:  api-switch generate-claude-config")
+		fmt.Println("  - Start proxy:        api-switch serve")
+	}
+	fmt.Println()
+
 	return nil
 }
 
