@@ -162,7 +162,25 @@ Examples:
 	}
 	doctorCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
 
-	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, genClaudeCmd, doctorCmd)
+	// monitor command
+	monitorCmd := &cobra.Command{
+		Use:   "monitor",
+		Short: "View real-time request traffic",
+		Long: `Connect to a running API-Switch proxy and display live request traffic.
+
+By default, connects to localhost:8080 and shows a streaming log of requests.
+Use --port to specify a different proxy port.
+
+Examples:
+  api-switch monitor          Watch live traffic on default port 8080
+  api-switch monitor --port 9090  Watch traffic on port 9090
+  api-switch monitor --web    Print the web dashboard URL`,
+		RunE: runMonitor,
+	}
+	monitorCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
+	monitorCmd.Flags().Bool("web", false, "show web dashboard URL instead of terminal view")
+
+	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, genClaudeCmd, doctorCmd, monitorCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -608,6 +626,24 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	return nil
+}
+
+func runMonitor(cmd *cobra.Command, args []string) error {
+	webMode, _ := cmd.Flags().GetBool("web")
+
+	if webMode {
+		addr := fmt.Sprintf("localhost:%d", port)
+		fmt.Printf("Web dashboard: http://%s/admin/\n", addr)
+		fmt.Println()
+		fmt.Println("Open this URL in your browser while the API-Switch proxy is running.")
+		return nil
+	}
+
+	addr := fmt.Sprintf(":%d", port)
+	if err := proxy.MonitorConnect(addr); err != nil {
+		return fmt.Errorf("monitor error: %w", err)
+	}
 	return nil
 }
 

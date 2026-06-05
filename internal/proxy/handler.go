@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/user/api-switch/internal/config"
+	"github.com/user/api-switch/internal/monitor"
 	"github.com/user/api-switch/internal/streaming"
 	"github.com/user/api-switch/pkg/anthropic"
 	"github.com/user/api-switch/pkg/openai"
@@ -15,15 +17,17 @@ import (
 // Server is the HTTP proxy server for Claude Code.
 // It accepts Anthropic Messages API requests and routes them to the correct provider.
 type Server struct {
-	cfg    *config.Config
-	router *Router
+	cfg     *config.Config
+	router  *Router
+	tracker *monitor.Tracker
 }
 
 // NewServer creates a new proxy server.
 func NewServer(cfg *config.Config) *Server {
 	return &Server{
-		cfg:    cfg,
-		router: NewRouter(cfg),
+		cfg:     cfg,
+		router:  NewRouter(cfg),
+		tracker: monitor.NewTracker(1000),
 	}
 }
 
@@ -35,12 +39,26 @@ func (s *Server) Start(addr string) error {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "ok")
 	})
+	// Admin / monitoring routes
+	mux.HandleFunc("/admin/", s.handleAdminDashboard)
+	mux.HandleFunc("/admin/stats", s.handleAdminStats)
+	mux.HandleFunc("/admin/events", s.handleAdminEvents)
 	return http.ListenAndServe(addr, mux)
 }
 
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
+	ev := &monitor.RequestEvent{
+		ID:        s.tracker.NextID(),
+		Timestamp: time.Now(),
+		Status:    "ok",
+	}
+
 	if r.Method != http.MethodPost {
 		writeAnthropicError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only POST is supported")
+		ev.Status = "error"
+		ev.Error = "method not allowed"
+		ev.Duration = time.Since(ev.Timestamp)
+		s.tracker.Record(ev)
 		return
 	}
 
@@ -48,8 +66,15 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	var antReq anthropic.MessagesRequest
 	if err := json.NewDecoder(r.Body).Decode(&antReq); err != nil {
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		ev.Status = "error"
+		ev.Error = err.Error()
+		ev.Duration = time.Since(ev.Timestamp)
+		s.tracker.Record(ev)
 		return
 	}
+
+	ev.Model = antReq.Model
+	ev.Stream = antReq.Stream
 
 	// Route the model
 	route, err := s.router.Route(antReq.Model)
@@ -57,8 +82,16 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Model not found in routing table: %q", antReq.Model)
 		writeAnthropicError(w, http.StatusNotFound, "not_found",
 			fmt.Sprintf("Model %q is not configured. Use `api-switch model add %s <provider>` to add it, then `api-switch use %s` to switch.", antReq.Model, antReq.Model, antReq.Model))
+		ev.Status = "error"
+		ev.Error = fmt.Sprintf("model %q not found", antReq.Model)
+		ev.Duration = time.Since(ev.Timestamp)
+		s.tracker.Record(ev)
 		return
 	}
+
+	ev.Model = antReq.Model
+	ev.Provider = route.ProviderName
+	ev.ProviderType = route.ProviderType
 
 	log.Printf("Request model=%s provider=%s type=%s actualModel=%s stream=%v",
 		antReq.Model, route.ProviderName, route.ProviderType, route.ActualModel, antReq.Stream)
@@ -71,7 +104,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAnthropicError(w, http.StatusInternalServerError, "unknown_provider_type",
 			fmt.Sprintf("provider type %q is not supported", route.ProviderType))
+		ev.Status = "error"
+		ev.Error = "unknown provider type"
 	}
+
+	ev.Duration = time.Since(ev.Timestamp)
+	s.tracker.Record(ev)
 }
 
 // handleAnthropic handles requests for Anthropic models (direct passthrough).
