@@ -5,48 +5,234 @@
 ```
 claude → api-switch → ├─ claude-*  → Anthropic API (透传)
                        ├─ gpt-4o    → 转 OpenAI 协议 → OpenAI API → 转回 Anthropic 格式
-                       └─ deepseek  → 转 OpenAI 协议 → DeepSeek API → 转回 Anthropic 格式
+                       ├─ deepseek  → 转 OpenAI 协议 → DeepSeek API → 转回 Anthropic 格式
+                       └─ qwen      → 转 OpenAI 协议 → DashScope API → 转回 Anthropic 格式
 ```
 
-## 快速开始
+## ✨ 特性
+
+- **零配置切换模型** — `api-switch use <model>` 即刻切换，Claude Code 热加载
+- **多提供商支持** — Anthropic、OpenAI、DeepSeek、Qwen、Moonshot 等任意 OpenAI 兼容 API
+- **协议自动转换** — Anthropic ↔ OpenAI 双向转换，含流式 SSE、工具调用、图片
+- **Provider 模板** — 内置 9+ 国产厂商预设，一条命令添加
+- **实时监控** — Web 仪表盘 + 终端实时日志
+- **热加载配置** — 修改配置文件自动生效，无需重启
+- **一键诊断** — `api-switch doctor` 快速定位配置问题
+- **批量导入** — 自动拉取 API 可用模型列表
+
+## ⚡ 快速开始
+
+### 使用 Provider 模板（推荐）
 
 ```bash
-# 1. 添加一个提供商（Anthropic 直连）
+# 添加 DeepSeek（自动填充 base_url、type、建议模型）
+api-switch provider add deepseek --key sk-xxx
+
+# 添加 Qwen（通义千问）
+api-switch provider add qwen --key sk-xxx
+
+# 切换模型并启动
+api-switch use deepseek-chat
+api-switch serve
+```
+
+### 或手动配置
+
+```bash
+# 1. 添加一个提供商
 api-switch setup \
   --name anthropic --type anthropic \
   --url https://api.anthropic.com \
   --key sk-ant-xxx \
   --models claude-sonnet-4-20250514
 
-# 2. 添加另一个提供商（OpenAI，自动协议转换）
-api-switch setup \
-  --name openai --type openai \
-  --url https://api.openai.com \
-  --key sk-xxx \
-  --models gpt-4o
-
-# 3. 切换模型，启动代理
-api-switch use gpt-4o   # Claude Code settings.json 自动更新
-api-switch serve         # 启动本地代理
+# 2. 切换模型，启动代理
+api-switch use claude-sonnet-4-20250514
+api-switch serve
 ```
 
-然后正常使用 `claude` 即可。Claude Code 的请求自动通过代理，路由到对应模型。
+之后正常使用 `claude` 命令即可，所有请求自动通过代理路由。
 
-### 切换模型
+## 📦 安装
+
+### 从源码构建
 
 ```bash
-# 查看所有可用模型
-api-switch use
-
-# 切换到指定模型（自动更新 ~/.claude/settings.json）
-api-switch use gpt-4o
-api-switch use claude-sonnet-4-20250514
-api-switch use deepseek-chat
-
-# Claude Code 热加载配置，立即生效
+git clone https://github.com/hxz0727/API-Switch.git
+cd API-Switch
+go build -o api-switch ./cmd/api-switch/
+sudo cp api-switch /usr/local/bin/
 ```
 
-## 核心概念
+### 前置依赖
+
+- Go 1.22+（构建用）
+- Claude Code（已安装并登录）
+
+## 🎯 命令参考
+
+### Provider 管理
+
+```bash
+# 从预设模板添加（自动填充 base_url 和 type）
+api-switch provider add deepseek --key sk-xxx
+api-switch provider add qwen --key sk-xxx
+api-switch provider add moonshot --key sk-xxx
+
+# 支持的厂商
+# deepseek  → https://api.deepseek.com
+# qwen      → https://dashscope.aliyuncs.com/compatible-mode/v1
+# moonshot  → https://api.moonshot.cn/v1
+# glm       → https://open.bigmodel.cn/api/paas/v4
+# kimi      → https://api.moonshot.cn/v1
+# yi        → https://api.lingyiwanwu.com/v1
+# step      → https://api.stepfun.com/v1
+# ernie     → https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat
+# hunyuan   → https://api.hunyuan.cloud.tencent.com/v1
+
+# 自定义提供商
+api-switch provider add my-provider \
+  --url https://my-api.com/v1 \
+  --type openai \
+  --key sk-xxx \
+  --models model-a,model-b
+
+# 查看所有提供商
+api-switch provider list
+```
+
+### 模型管理
+
+```bash
+# 列出所有模型
+api-switch model list
+
+# 添加模型路由
+api-switch model add deepseek-chat deepseek
+
+# 批量导入（自动查询 API 的 /v1/models）
+api-switch model import deepseek
+
+# 删除模型
+api-switch model remove deepseek-chat
+```
+
+### 模型切换
+
+```bash
+# 查看所有可用模型（→ 标记当前激活的）
+api-switch use
+
+# 切换到指定模型
+api-switch use gpt-4o
+api-switch use deepseek-chat
+api-switch use qwen-plus
+```
+
+### 启动服务
+
+```bash
+# 默认 8080 端口
+api-switch serve
+
+# 自定义端口 + 日志级别
+api-switch serve -p 9090 -vv          # debug 级别日志
+api-switch serve -q                     # 仅显示错误
+api-switch serve -v                     # 带请求详情
+
+# 配置热加载：修改 ~/.api-switch.yaml 后自动生效
+```
+
+### 监控与诊断
+
+```bash
+# Web 仪表盘（浏览器打开 http://localhost:8080/admin/）
+api-switch monitor --web
+
+# 终端实时监控
+api-switch monitor
+
+# 一键诊断
+api-switch doctor
+```
+
+### 配置管理
+
+```bash
+api-switch config show                     # 查看配置（key 脱敏）
+api-switch config set providers.openai.api_key sk-xxx
+api-switch config init                     # 创建默认配置
+api-switch generate-claude-config          # 生成 Claude Code 配置
+```
+
+## 🌐 Web 仪表盘
+
+启动服务后访问 `http://localhost:8080/admin/`：
+
+- 实时请求列表（SSE 推送）
+- 请求总数、平均耗时、模型分布统计
+- 每条请求的模型、Provider、耗时、状态
+
+![dashboard](https://via.placeholder.com/600x300?text=API-Switch+Dashboard)
+
+## 🔧 场景示例
+
+### 混用 Anthropic + DeepSeek
+
+```bash
+# 配置
+api-switch provider add anthropic --key sk-ant-xxx --url https://api.anthropic.com --type anthropic
+api-switch provider add deepseek --key sk-xxx
+
+# 使用
+api-switch use deepseek-chat   # 切换到 DeepSeek
+api-switch serve
+# Claude Code 会话中随时切换：
+api-switch use claude-sonnet-4-20250514  # 切回 Claude
+```
+
+### 只用国产模型（Qwen + DeepSeek）
+
+```bash
+api-switch provider add qwen --key sk-xxx
+api-switch provider add deepseek --key sk-xxx
+
+api-switch use qwen-plus
+api-switch serve
+```
+
+### 实时切换工作流
+
+```bash
+# 终端 1（代理服务）
+api-switch serve
+
+# 终端 2（随时切换模型）
+api-switch use gpt-4o           # 切换到 GPT-4o
+# Claude Code 自动生效
+api-switch use deepseek-chat    # 切换到 DeepSeek
+# 也立即生效
+```
+
+## 📊 架构
+
+```
+                    ┌─ Anthropic Client (透传) ──→ Anthropic API
+                    │
+claude ──→ /v1/messages ──┤
+       POST               │                          ┌─ 请求转换 ──┐
+                           └─ OpenAI Client ──→  ──→ │  OpenAI 协议  │ ──→ OpenAI/DeepSeek 等
+                                                     └─ 响应转换 ──┘
+
+管理端点:
+  /health          → 健康检查
+  /admin/          → Web 仪表盘
+  /admin/stats     → JSON 统计
+  /admin/events    → SSE 实时事件
+  /admin/reload    → 热加载配置 (POST)
+```
+
+## ⚙️ 核心概念
 
 ### 配置文件
 
@@ -62,178 +248,112 @@ api-switch use deepseek-chat
 | `anthropic` | 直连 Anthropic API，无协议转换 |
 | `openai` | 走 OpenAI 兼容协议，请求/响应自动双向转换 |
 
-### settings.json 示例
+### 协议转换支持
 
-```json
-{
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "model": "gpt-4o",
-  "env": {
-    "ANTHROPIC_BASE_URL": "http://localhost:8080",
-    "ANTHROPIC_API_KEY": "use-api-switch",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION": "gpt-4o"
-  }
-}
-```
+| 特性 | 支持 | 说明 |
+|---|---|---|
+| Text 消息 | ✅ | 双向转换 |
+| 流式 SSE | ✅ | OpenAI ↔ Anthropic SSE |
+| 工具调用 | ✅ | tools / tool_choice / tool_use / tool_result |
+| 流式工具调用 | ✅ | input_json_delta streaming |
+| 图片 | ✅ | Anthropic image → OpenAI image_url |
+| System 消息 | ✅ | 自动置顶 |
 
-- `ANTHROPIC_BASE_URL` — 指向本地代理
-- `ANTHROPIC_API_KEY` — 占位值，真实 key 在 API-Switch 配置中
-- `ANTHROPIC_CUSTOM_MODEL_OPTION` — 非 Claude 模型显示在 `/model` 选择器中
-- `model` — 当前激活模型
+## 🩺 常见问题
 
-## 命令参考
-
-### `api-switch use [model]`
-
-切换 Claude Code 的当前模型，自动更新 `~/.claude/settings.json`。
+### 如何验证代理是否正常工作？
 
 ```bash
-api-switch use                # 列出所有模型，标记当前激活的
-api-switch use gpt-4o         # 切换到 gpt-4o
-api-switch use deepseek-chat  # 切换到 DeepSeek
+# 健康检查
+curl http://localhost:8080/health
+
+# 完整诊断
+api-switch doctor
+
+# 发送测试请求
+curl http://localhost:8080/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-chat","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
-### `api-switch setup`
+### 修改配置后需要重启吗？
 
-添加一个提供商及其模型到配置。
+不需要。API-Switch 会自动监听 `~/.api-switch.yaml` 的文件变更，500ms 防抖后自动重载。也可以手动触发：
 
 ```bash
-api-switch setup --name openai --type openai \
-  --url https://api.openai.com --key sk-xxx \
-  --models gpt-4o,gpt-4
+curl -X POST http://localhost:8080/admin/reload
 ```
 
-| 参数 | 说明 |
-|---|---|
-| `--name` | 提供商名称 |
-| `--type` | `anthropic` 或 `openai` |
-| `--url` | API 基础 URL |
-| `--key` | API Key |
-| `--models` | 逗号分隔的模型名 |
-| `-p` | 代理端口（默认 8080） |
-
-### `api-switch serve`
-
-启动代理服务。
+### 如何查看实时流量？
 
 ```bash
-api-switch serve          # 默认 8080
-api-switch serve -p 9090  # 自定义端口
+# Web 仪表盘
+api-switch monitor --web
+# 浏览器打开 http://localhost:8080/admin/
+
+# 终端实时日志
+api-switch monitor
 ```
-
-### `api-switch model`
-
-```bash
-api-switch model list                      # 列出所有模型
-api-switch model add gpt-4o openai         # 添加模型路由
-api-switch model remove gpt-4o             # 移除模型
-```
-
-### `api-switch provider`
-
-```bash
-api-switch provider list  # 列出所有提供商及 key 状态
-```
-
-### `api-switch config`
-
-```bash
-api-switch config show                           # 显示配置（key 脱敏）
-api-switch config set providers.openai.api_key sk-xxx
-api-switch config init                           # 创建默认配置
-```
-
-## 场景示例
-
-### 只用 OpenAI
-
-```bash
-api-switch setup --name openai --type openai \
-  --url https://api.openai.com --key sk-xxx \
-  --models gpt-4o
-
-api-switch use gpt-4o
-api-switch serve
-```
-
-### 混用 Anthropic + DeepSeek
-
-```bash
-api-switch setup --name anthropic --type anthropic \
-  --url https://api.anthropic.com --key sk-ant-xxx \
-  --models claude-sonnet-4-20250514
-
-api-switch setup --name deepseek --type openai \
-  --url https://api.deepseek.com --key sk-xxx \
-  --models deepseek-chat
-
-api-switch use deepseek-chat   # 切换到 DeepSeek
-api-switch serve
-```
-
-### 在 Claude Code 中实时切换
-
-```bash
-# 终端 1（永久运行）
-api-switch serve
-
-# 终端 2 或直接在 Claude Code 中
-api-switch use gpt-4o          # 切换到 GPT-4o
-# Claude Code 热加载，立即生效
-
-api-switch use claude-sonnet   # 切回 Claude
-# 也立即生效
-```
-
-## 常见问题
 
 ### 切换模型后需要重启 Claude Code 吗？
 
 不需要。Claude Code 热加载 `~/.claude/settings.json`，`api-switch use` 切换后立即生效。
 
-### 代理验证
+### 如何修改端口？
 
 ```bash
-curl http://localhost:8080/health
-# → ok
-
-curl http://localhost:8080/v1/messages \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: use-api-switch" \
-  -d '{"model":"gpt-4o","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
-```
-
-### 修改端口
-
-```bash
-# 方案一
+# 方案一：配置文件
 api-switch config set server.port 9090
 api-switch generate-claude-config -p 9090
 
-# 方案二
+# 方案二：运行时指定（推荐）
 api-switch serve -p 9090
 api-switch use gpt-4o    # 自动使用配置中的端口
 ```
 
-### 更新 API Key
+### 如何更新 API Key？
 
 ```bash
 api-switch config set providers.openai.api_key sk-new-key
 ```
 
-## 项目结构
+### 配置热加载不生效？
+
+确保文件是保存到原路径而非临时文件。大部分编辑器（vim/nano）直接保存可以触发。如果使用 VS Code Remote，可能需要手动触发：
+
+```bash
+curl -X POST http://localhost:8080/admin/reload
+```
+
+## 📁 项目结构
 
 ```
 cmd/api-switch/main.go              # CLI 入口
-internal/config/config.go           # API-Switch 配置
-internal/config/claude_config.go    # Claude Code 配置管理
-internal/proxy/handler.go           # HTTP 代理 + 请求处理
-internal/proxy/converter.go         # Anthropic→OpenAI 请求转换
-internal/proxy/response.go          # OpenAI→Anthropic 响应转换
-internal/proxy/router.go            # 模型路由
-internal/provider/anthropic.go      # Anthropic API 客户端
-internal/provider/openai.go         # OpenAI API 客户端
-internal/streaming/sse.go           # SSE 流式转换
-pkg/anthropic/types.go              # Anthropic 类型
-pkg/openai/types.go                 # OpenAI 类型
+internal/
+├── config/
+│   ├── config.go                   # 配置类型、加载、保存、路由
+│   ├── claude_config.go            # Claude Code 配置管理
+│   └── doctor.go                   # 一键诊断
+├── logutil/
+│   └── logger.go                   # 分级日志
+├── monitor/
+│   └── tracker.go                  # 请求事件追踪
+├── provider/
+│   ├── anthropic.go                # Anthropic API 客户端
+│   └── openai.go                   # OpenAI API 客户端
+├── proxy/
+│   ├── handler.go                  # HTTP 代理 + 请求处理
+│   ├── admin.go                    # 管理端点（仪表盘、SSE、监控）
+│   ├── converter.go                # Anthropic ↔ OpenAI 请求转换
+│   ├── response.go                 # OpenAI → Anthropic 响应转换
+│   └── router.go                   # 模型路由
+└── streaming/
+    └── sse.go                      # SSE 流式转换
+pkg/
+├── anthropic/types.go              # Anthropic 类型定义
+└── openai/types.go                 # OpenAI 类型定义
 ```
+
+## 📝 开源协议
+
+MIT
