@@ -1,0 +1,7 @@
+.git/
+.gitignore
+*.md
+api-switch
+install.sh
+test/
+tmp/

@@ -1,0 +1,36 @@
+# ============================================
+# API-Switch Docker
+# 构建: docker build -t api-switch .
+# 运行: docker run -d -p 8080:8080 \
+#          -v ~/.api-switch.yaml:/root/.api-switch.yaml \
+#          -v ~/.claude:/root/.claude \
+#          api-switch
+# ============================================
+
+# ---- Build stage ----
+FROM golang:1.23-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o api-switch ./cmd/api-switch/
+
+# ---- Runtime stage ----
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /build/api-switch /usr/local/bin/api-switch
+
+# 默认端口
+EXPOSE 8080
+
+# 默认配置目录
+VOLUME ["/root/.api-switch.yaml"]
+
+ENTRYPOINT ["api-switch"]
+CMD ["serve"]

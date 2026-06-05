@@ -55,18 +55,40 @@ api-switch serve
 
 ## 📦 安装
 
-### 从源码构建
+### 方式一：一键安装脚本（推荐）
+
+```bash
+curl -sSL https://raw.githubusercontent.com/hxz0727/API-Switch/master/install.sh | bash
+
+# 或下载后本地执行
+curl -sSLO https://raw.githubusercontent.com/hxz0727/API-Switch/master/install.sh
+chmod +x install.sh && ./install.sh
+```
+
+脚本会自动：检查/安装 Go → 克隆仓库 → 编译二进制 → 添加到 PATH。
+
+### 方式二：Docker 部署
+
+```bash
+docker build -t api-switch .
+docker run -d -p 8080:8080 \
+  -v ~/.api-switch.yaml:/root/.api-switch.yaml \
+  -v ~/.claude:/root/.claude \
+  api-switch
+```
+
+### 方式三：手动编译
 
 ```bash
 git clone https://github.com/hxz0727/API-Switch.git
 cd API-Switch
-go build -o api-switch ./cmd/api-switch/
-sudo cp api-switch /usr/local/bin/
+make build              # 或 go build -o api-switch ./cmd/api-switch/
+make install            # 安装到 ~/.local/bin/
 ```
 
 ### 前置依赖
 
-- Go 1.22+（构建用）
+- Go 1.22+（脚本可自动安装）
 - Claude Code（已安装并登录）
 
 ## 🎯 命令参考
