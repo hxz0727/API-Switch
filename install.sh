@@ -40,10 +40,10 @@ step "1/4  检查 Go 环境"
 if command -v go &>/dev/null; then
     go_version=$(go version | grep -oP 'go\K[0-9]+\.[0-9]+')
     info "Go 版本: $go_version"
-    # 需要 Go 1.22+
+    # 需要 Go 1.21+
     major=$(echo "$go_version" | cut -d. -f1)
     minor=$(echo "$go_version" | cut -d. -f2)
-    if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 22 ]; }; then
+    if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 21 ]; }; then
         error "Go 版本过低，需要 >= 1.22，当前: $go_version"
         exit 1
     fi
