@@ -8,16 +8,19 @@
 # ============================================
 
 # ---- Build stage ----
-FROM golang:1.23-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 
+# 国内用户可设置构建参数: docker build --build-arg GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY=https://proxy.golang.org,direct
+
 WORKDIR /build
 COPY go.mod go.sum ./
-RUN go mod download
+RUN GOPROXY=${GOPROXY} go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o api-switch ./cmd/api-switch/
+RUN CGO_ENABLED=0 GOPROXY=${GOPROXY} go build -ldflags="-s -w" -o api-switch ./cmd/api-switch/
 
 # ---- Runtime stage ----
 FROM alpine:3.20

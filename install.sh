@@ -21,6 +21,16 @@ REPO="https://github.com/hxz0727/API-Switch.git"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/api-switch}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
+# ── 0. 设置 Go 代理（国内用户使用 goproxy.cn） ─────
+if [ -z "${GOPROXY:-}" ]; then
+    if curl -sI --max-time 5 "https://proxy.golang.org" >/dev/null 2>&1; then
+        :  # 默认 proxy 可达，使用默认值
+    else
+        info "Go 官方代理不可达，使用 goproxy.cn（中国镜像）"
+        export GOPROXY="https://goproxy.cn,direct"
+    fi
+fi
+
 # ── 1. 检查 Go ────────────────────────────────────
 step "1/4  检查 Go 环境"
 

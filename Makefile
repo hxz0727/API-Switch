@@ -4,9 +4,11 @@ BINARY   = api-switch
 OUTPUT   = ./$(BINARY)
 SRC      = ./cmd/api-switch/
 LDFLAGS  = -ldflags="-s -w"
+# 国内用户可设置: make build GOPROXY=https://goproxy.cn,direct
+GOPROXY ?= https://proxy.golang.org,direct
 
 build:
-	go build $(LDFLAGS) -o $(OUTPUT) $(SRC)
+	GOPROXY=$(GOPROXY) go build $(LDFLAGS) -o $(OUTPUT) $(SRC)
 
 install: build
 	mkdir -p $(HOME)/.local/bin
@@ -24,16 +26,13 @@ lint:
 
 test:
 	go vet ./...
-	go test -v -count=1 -race ./...
+	GOPROXY=$(GOPROXY) go test -v -count=1 -race ./...
 
 tidy:
-	go mod tidy
+	GOPROXY=$(GOPROXY) go mod tidy
 
 docker:
 	docker build -t api-switch .
-
-release:
-	goreleaser release --snapshot --clean
 
 # 快捷命令
 deepseek: build
