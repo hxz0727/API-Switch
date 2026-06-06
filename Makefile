@@ -3,7 +3,8 @@
 BINARY   = api-switch
 OUTPUT   = ./$(BINARY)
 SRC      = ./cmd/api-switch/
-LDFLAGS  = -ldflags="-s -w"
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "dev")
+LDFLAGS  = -ldflags="-s -w -X main.Version=$(VERSION)"
 # 禁止 Go 自动下载 toolchain（使用本地 Go 版本编译）
 export GOTOOLCHAIN=local
 

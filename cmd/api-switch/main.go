@@ -20,6 +20,9 @@ var (
 	cfgPath string
 )
 
+// Version injected at build time via -ldflags, or falls back to default.
+var Version = "0.2.3-dev"
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "api-switch",
@@ -274,7 +277,18 @@ Examples:
 	monitorCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
 	monitorCmd.Flags().Bool("web", false, "show web dashboard URL instead of terminal view")
 
-	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd)
+	// version command
+	versionCmd := &cobra.Command{
+		Use:     "version",
+		Aliases: []string{"-v", "--version"},
+		Short:   "Show version information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Printf("api-switch-cc v%s\n", Version)
+			return nil
+		},
+	}
+
+	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
