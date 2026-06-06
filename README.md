@@ -19,35 +19,35 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **热加载配置** — 修改配置文件自动生效，无需重启
 - **一键诊断** — `api-switch doctor` 快速定位配置问题
 - **批量导入** — 自动拉取 API 可用模型列表
+- **端到端测试** — `api-switch test [model]` 验证代理是否正常工作
+- **provider 连通性检测** — `api-switch provider test <name>` 测试厂商 API 是否可达
 
 ## ⚡ 快速开始
 
-### 使用 Provider 模板（推荐）
+### 方式一：setup 一条命令（推荐）
 
 ```bash
-# 添加 DeepSeek（自动填充 base_url、type、建议模型）
-api-switch provider add deepseek --key sk-xxx
+# 安装
+npm install -g @hxz0727/api-switch-cc
 
-# 添加 Qwen（通义千问）
-api-switch provider add qwen --key sk-xxx
+# DeepSeek — 自动填充 base_url、type、建议模型
+api-switch setup deepseek --key sk-xxx
 
-# 切换模型并启动
-api-switch use deepseek-chat
+# 启动
 api-switch serve
 ```
 
-### 或手动配置
+### 方式二：分步操作
 
 ```bash
-# 1. 添加一个提供商
-api-switch setup \
-  --name anthropic --type anthropic \
-  --url https://api.anthropic.com \
-  --key sk-ant-xxx \
-  --models claude-sonnet-4-20250514
+# 1. 添加提供商
+api-switch provider add deepseek --key sk-xxx
 
-# 2. 切换模型，启动代理
-api-switch use claude-sonnet-4-20250514
+# 2. 导入模型
+api-switch model import deepseek
+
+# 3. 切换模型，启动代理
+api-switch use deepseek-chat
 api-switch serve
 ```
 
@@ -55,32 +55,27 @@ api-switch serve
 
 ## 📦 安装
 
-### 方式一：npm 安装（推荐）
+### npm 安装（推荐）
 
 ```bash
 # 全局安装
 npm install -g @hxz0727/api-switch-cc
 
 # 或直接使用（无需安装）
-npx @hxz0727/api-switch-cc provider add deepseek --key sk-xxx
 npx @hxz0727/api-switch-cc serve
 ```
 
 npm 包自动下载对应平台的预编译二进制，无需 Go 环境。
 
-### 方式二：一键安装脚本
+### 一键安装脚本
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/hxz0727/API-Switch/master/install.sh | bash
-
-# 或下载后本地执行
-curl -sSLO https://raw.githubusercontent.com/hxz0727/API-Switch/master/install.sh
-chmod +x install.sh && ./install.sh
 ```
 
 脚本会自动：检查/安装 Go → 克隆仓库 → 编译二进制 → 添加到 PATH。
 
-### 方式三：Docker 部署
+### Docker 部署
 
 ```bash
 docker build -t api-switch .
@@ -90,7 +85,7 @@ docker run -d -p 8080:8080 \
   api-switch
 ```
 
-### 方式四：手动编译
+### 手动编译
 
 ```bash
 git clone https://github.com/hxz0727/API-Switch.git
@@ -101,13 +96,27 @@ make install            # 安装到 ~/.local/bin/
 
 ## 🎯 命令参考
 
+### 无参数运行（新手引导）
+
+```bash
+$ api-switch
+
+API-Switch — LLM API proxy for Claude Code
+================================================
+
+快速开始：
+  # 1. 添加一个供应商（支持已知厂商预设）
+  api-switch provider add deepseek --key sk-xxx
+  ...
+```
+
 ### Provider 管理
 
 ```bash
-# 从预设模板添加（自动填充 base_url 和 type）
+# 从预设模板添加（自动填充 base_url 和 type，未传 --key 会交互式输入）
 api-switch provider add deepseek --key sk-xxx
-api-switch provider add qwen --key sk-xxx
-api-switch provider add moonshot --key sk-xxx
+api-switch provider add qwen
+# → Enter API key for "qwen": _
 
 # 支持的厂商
 # deepseek  → https://api.deepseek.com
@@ -124,24 +133,27 @@ api-switch provider add moonshot --key sk-xxx
 api-switch provider add my-provider \
   --url https://my-api.com/v1 \
   --type openai \
-  --key sk-xxx \
-  --models model-a,model-b
+  --key sk-xxx
 
 # 查看所有提供商
-api-switch provider list
+api-switch provider list          # 也可用 provider ls
+
+# 测试提供商连通性
+api-switch provider test deepseek # 也可用 provider ping
 ```
 
 ### 模型管理
 
 ```bash
 # 列出所有模型
-api-switch model list
+api-switch model list          # 也可用 model ls
 
 # 添加模型路由
 api-switch model add deepseek-chat deepseek
 
 # 批量导入（自动查询 API 的 /v1/models）
 api-switch model import deepseek
+api-switch model import openai --filter gpt-4   # 只导入 gpt-4 相关模型
 
 # 删除模型
 api-switch model remove deepseek-chat
@@ -157,6 +169,32 @@ api-switch use
 api-switch use gpt-4o
 api-switch use deepseek-chat
 api-switch use qwen-plus
+```
+
+### setup 一键配置
+
+```bash
+# 已知厂商（自动填充 type、url、建议模型）
+api-switch setup deepseek --key sk-xxx
+
+# 自定义厂商
+api-switch setup --name custom --type openai --url https://... --key sk-xxx --models m1,m2
+
+# 以上命令会自动：
+#   1. 添加 provider 到配置
+#   2. 添加模型到路由表
+#   3. 生成 Claude Code settings.json
+```
+
+### 端到端测试
+
+```bash
+# 测试当前激活的模型
+api-switch test
+
+# 测试指定模型
+api-switch test deepseek-chat
+# → ✓ Response received (stop_reason=end_turn, input=56, output=10)
 ```
 
 ### 启动服务
@@ -189,10 +227,10 @@ api-switch doctor
 ### 配置管理
 
 ```bash
-api-switch config show                     # 查看配置（key 脱敏）
+api-switch config show                # 查看配置（key 脱敏）
+api-switch config cat                 # 同上，别名
 api-switch config set providers.openai.api_key sk-xxx
-api-switch config init                     # 创建默认配置
-api-switch generate-claude-config          # 生成 Claude Code 配置
+api-switch config init                # 创建默认配置
 ```
 
 ## 🌐 Web 仪表盘
@@ -202,8 +240,6 @@ api-switch generate-claude-config          # 生成 Claude Code 配置
 - 实时请求列表（SSE 推送）
 - 请求总数、平均耗时、模型分布统计
 - 每条请求的模型、Provider、耗时、状态
-
-![dashboard](https://via.placeholder.com/600x300?text=API-Switch+Dashboard)
 
 ## 🔧 场景示例
 
@@ -224,9 +260,8 @@ api-switch use claude-sonnet-4-20250514  # 切回 Claude
 ### 只用国产模型（Qwen + DeepSeek）
 
 ```bash
-api-switch provider add qwen --key sk-xxx
-api-switch provider add deepseek --key sk-xxx
-
+api-switch setup qwen --key sk-xxx
+api-switch setup deepseek --key sk-xxx
 api-switch use qwen-plus
 api-switch serve
 ```
@@ -255,7 +290,7 @@ claude ──→ /v1/messages ──┤
                                                      └─ 响应转换 ──┘
 
 管理端点:
-  /health          → 健康检查
+  /health          → 健康检查 (JSON: models, providers, requests)
   /admin/          → Web 仪表盘
   /admin/stats     → JSON 统计
   /admin/events    → SSE 实时事件
@@ -294,16 +329,14 @@ claude ──→ /v1/messages ──┤
 ### 如何验证代理是否正常工作？
 
 ```bash
+# 一键测试（推荐）
+api-switch test deepseek-chat
+
 # 健康检查
 curl http://localhost:8080/health
 
 # 完整诊断
 api-switch doctor
-
-# 发送测试请求
-curl http://localhost:8080/v1/messages \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-chat","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 ### 修改配置后需要重启吗？
@@ -319,7 +352,6 @@ curl -X POST http://localhost:8080/admin/reload
 ```bash
 # Web 仪表盘
 api-switch monitor --web
-# 浏览器打开 http://localhost:8080/admin/
 
 # 终端实时日志
 api-switch monitor
@@ -334,7 +366,6 @@ api-switch monitor
 ```bash
 # 方案一：配置文件
 api-switch config set server.port 9090
-api-switch generate-claude-config -p 9090
 
 # 方案二：运行时指定（推荐）
 api-switch serve -p 9090
@@ -383,7 +414,3 @@ pkg/
 ├── anthropic/types.go              # Anthropic 类型定义
 └── openai/types.go                 # OpenAI 类型定义
 ```
-
-## 📝 开源协议
-
-MIT
