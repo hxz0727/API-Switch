@@ -62,19 +62,25 @@ api-switch serve
 ### npm 安装（推荐）
 
 ```bash
-# 全局安装
+# 全局安装（秒完成，二进制首次运行时自动安装）
 npm install -g api-switch-cc
 
 # 或直接使用（无需安装）
 npx api-switch-cc serve
 ```
 
-npm 包自动下载对应平台的预编译二进制，无需 Go 环境。
+npm 包秒装（无 postinstall 阻塞），二进制在首次运行 `api-switch` 时自动安装。
+
+**国内用户：** 若 GitHub 下载慢，npm 包会自动走 gitee.com 镜像或 go install 源码编译。
 
 ### 一键安装脚本
 
 ```bash
+# 普通用户
 curl -sSL https://raw.githubusercontent.com/hxz0727/API-Switch/master/install.sh | bash
+
+# 国内用户（优先 Gitee 镜像）
+curl -sSL https://gitee.com/776311606/API-Switch/raw/master/install.sh | bash
 ```
 
 脚本会自动：检查/安装 Go → 克隆仓库 → 编译二进制 → 添加到 PATH。
