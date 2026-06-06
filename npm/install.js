@@ -69,8 +69,11 @@ function install() {
   console.log(`Downloading ${DOWNLOAD_VERSION} for ${plat} ...`);
 
   try {
-    // Download
-    execSync(`curl -sSL "${url}" -o "${tmp}"`, { stdio: "pipe" });
+    // Download with retry and longer timeout
+    execSync(
+      `curl -sSL --connect-timeout 10 --max-time 120 --retry 3 "${url}" -o "${tmp}"`,
+      { stdio: "pipe", timeout: 180000 }
+    );
 
     // Extract (archive contains binary named api-switch-<plat>)
     const archiveBin = archivedBinaryName();
@@ -92,11 +95,16 @@ function install() {
     console.log(`Installed to ${binPath}`);
   } catch (err) {
     console.error(`Download failed: ${err.message}`);
-    console.log("Falling back to source build (requires Go)...");
-    execSync(
-      `cd ${join(__dirname, "..")} && go build -ldflags="-s -w" -o "${binPath}" ./cmd/api-switch/`,
-      { stdio: "inherit" }
-    );
+    console.log();
+    console.log("Manual installation:");
+    console.log(`  curl -sSL "${url}" | tar xz`);
+    console.log(`  sudo cp ${join(".", archiveBin)} /usr/local/bin/api-switch`);
+    console.log();
+    console.log("Or install from source (requires Go):");
+    console.log("  git clone https://github.com/hxz0727/API-Switch.git");
+    console.log("  cd API-Switch && make build");
+    console.log("  make install");
+    process.exit(1);
   }
 }
 

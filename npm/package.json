@@ -1,6 +1,6 @@
 {
   "name": "api-switch-cc",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen、GLM、Moonshot 等国产大模型，协议自动转换，零配置即用。LLM API proxy for Claude Code with DeepSeek, Qwen, Anthropic, OpenAI support.",
   "bin": {
     "api-switch": "bin/api-switch"
