@@ -30,7 +30,7 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 
 ```bash
 # 安装
-npm install -g @hxz0727/api-switch-cc
+npm install -g api-switch-cc
 
 # DeepSeek — 自动填充 base_url、type、建议模型
 api-switch setup deepseek --key sk-xxx
@@ -61,10 +61,10 @@ api-switch serve
 
 ```bash
 # 全局安装
-npm install -g @hxz0727/api-switch-cc
+npm install -g api-switch-cc
 
 # 或直接使用（无需安装）
-npx @hxz0727/api-switch-cc serve
+npx api-switch-cc serve
 ```
 
 npm 包自动下载对应平台的预编译二进制，无需 Go 环境。
