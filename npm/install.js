@@ -66,7 +66,7 @@ function install() {
   const url = `${BASE}/${archive}`;
   const tmp = join(__dirname, `_${archive}`);
 
-  console.log(`Downloading api-switch v${DOWNLOAD_VERSION} for ${plat} ...`);
+  console.log(`Downloading ${DOWNLOAD_VERSION} for ${plat} ...`);
 
   try {
     // Download
