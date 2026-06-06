@@ -1,6 +1,7 @@
 # @hxz0727/api-switch-cc
 
-> LLM API proxy for Claude Code — route to DeepSeek, Qwen, GLM, and more.
+> Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen（通义千问）、GLM（智谱）、Moonshot（月之暗面）等国产大模型。协议自动转换，零配置即用。
+> LLM API proxy for Claude Code — route to DeepSeek, Qwen, GLM, Moonshot and more with automatic protocol conversion.
 
 ```
 npm install -g @hxz0727/api-switch-cc

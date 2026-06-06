@@ -1,6 +1,8 @@
 # API-Switch
 
-面向 Claude Code 的 LLM API 代理工具。接收 Anthropic 格式请求，根据模型名自动路由到对应提供商，协议自动转换，模型即切即用。
+> Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen（通义千问）、GLM（智谱）、Moonshot（月之暗面）等国产大模型，协议自动转换，零配置即用。
+
+接收 Anthropic 格式请求，根据模型名自动路由到对应提供商，协议自动转换，模型即切即用。
 
 ```
 claude → api-switch → ├─ claude-*  → Anthropic API (透传)

@@ -23,7 +23,7 @@ var (
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "api-switch",
-		Short: "LLM API proxy with automatic protocol conversion for Claude Code",
+		Short: "Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen、GLM、Moonshot，协议自动转换，零配置即用",
 		RunE:  runRoot,
 	}
 
