@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/api-switch/pkg/anthropic"
-	"github.com/user/api-switch/pkg/openai"
+	"github.com/hxz0727/API-Switch/pkg/anthropic"
+	"github.com/hxz0727/API-Switch/pkg/openai"
 )
 
 // contentToString extracts a plain text string from an anthropic content field,

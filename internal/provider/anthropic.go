@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/user/api-switch/internal/config"
-	"github.com/user/api-switch/pkg/anthropic"
+	"github.com/hxz0727/API-Switch/internal/config"
+	"github.com/hxz0727/API-Switch/pkg/anthropic"
 )
 
 // AnthropicClient is an HTTP client for the Anthropic Messages API.

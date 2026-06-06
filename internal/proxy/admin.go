@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/api-switch/internal/logutil"
-	"github.com/user/api-switch/internal/monitor"
+	"github.com/hxz0727/API-Switch/internal/logutil"
+	"github.com/hxz0727/API-Switch/internal/monitor"
 )
 
 func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {

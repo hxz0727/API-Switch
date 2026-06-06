@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/user/api-switch/pkg/anthropic"
-	"github.com/user/api-switch/pkg/openai"
+	"github.com/hxz0727/API-Switch/pkg/anthropic"
+	"github.com/hxz0727/API-Switch/pkg/openai"
 )
 
 // ConvertOpenAIToAnthropic converts an OpenAI ChatCompletion response to an Anthropic Messages response.

@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/user/api-switch/internal/config"
-	"github.com/user/api-switch/internal/logutil"
-	"github.com/user/api-switch/internal/provider"
-	"github.com/user/api-switch/internal/proxy"
+	"github.com/hxz0727/API-Switch/internal/config"
+	"github.com/hxz0727/API-Switch/internal/logutil"
+	"github.com/hxz0727/API-Switch/internal/provider"
+	"github.com/hxz0727/API-Switch/internal/proxy"
 )
 
 var (

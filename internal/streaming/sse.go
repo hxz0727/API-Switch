@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/api-switch/pkg/anthropic"
-	"github.com/user/api-switch/pkg/openai"
+	"github.com/hxz0727/API-Switch/pkg/anthropic"
+	"github.com/hxz0727/API-Switch/pkg/openai"
 )
 
 // OpenAIToAnthropicStream reads OpenAI SSE events and writes Anthropic SSE events.

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/api-switch/internal/config"
-	"github.com/user/api-switch/pkg/openai"
+	"github.com/hxz0727/API-Switch/internal/config"
+	"github.com/hxz0727/API-Switch/pkg/openai"
 )
 
 // OpenAIClient is an HTTP client for OpenAI-compatible APIs.

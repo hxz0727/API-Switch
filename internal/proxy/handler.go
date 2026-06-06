@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/user/api-switch/internal/config"
-	"github.com/user/api-switch/internal/logutil"
-	"github.com/user/api-switch/internal/monitor"
-	"github.com/user/api-switch/internal/streaming"
-	"github.com/user/api-switch/pkg/anthropic"
-	"github.com/user/api-switch/pkg/openai"
+	"github.com/hxz0727/API-Switch/internal/config"
+	"github.com/hxz0727/API-Switch/internal/logutil"
+	"github.com/hxz0727/API-Switch/internal/monitor"
+	"github.com/hxz0727/API-Switch/internal/streaming"
+	"github.com/hxz0727/API-Switch/pkg/anthropic"
+	"github.com/hxz0727/API-Switch/pkg/openai"
 )
 
 // Server is the HTTP proxy server for Claude Code.

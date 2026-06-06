@@ -1,4 +1,4 @@
-module github.com/user/api-switch
+module github.com/hxz0727/API-Switch
 
 go 1.21
 

@@ -3,8 +3,8 @@ package proxy
 import (
 	"sync"
 
-	"github.com/user/api-switch/internal/config"
-	"github.com/user/api-switch/internal/provider"
+	"github.com/hxz0727/API-Switch/internal/config"
+	"github.com/hxz0727/API-Switch/internal/provider"
 )
 
 // Router routes requests to the correct provider based on model name.
