@@ -18,6 +18,7 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; }
 step()  { echo -e "\n${BOLD}═══ $* ═══${NC}"; }
 
 REPO="https://github.com/hxz0727/API-Switch.git"
+REPO_GITEE="https://gitee.com/776311606/API-Switch.git"  # 国内镜像
 INSTALL_DIR="${INSTALL_DIR:-$HOME/api-switch}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
@@ -90,7 +91,11 @@ if [ -d "$INSTALL_DIR" ]; then
     }
 else
     info "克隆仓库到 $INSTALL_DIR ..."
-    git clone --depth=1 "$REPO" "$INSTALL_DIR"
+    # 国内用户优先使用 Gitee 镜像
+    if ! git clone --depth=1 "$REPO_GITEE" "$INSTALL_DIR" 2>/dev/null; then
+        info "Gitee 不可达，尝试 GitHub ..."
+        git clone --depth=1 "$REPO" "$INSTALL_DIR"
+    fi
     cd "$INSTALL_DIR"
 fi
 

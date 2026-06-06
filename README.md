@@ -1,5 +1,7 @@
 # API-Switch
 
+> Gitee 镜像: https://gitee.com/776311606/API-Switch
+
 > Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen（通义千问）、GLM（智谱）、Moonshot（月之暗面）等国产大模型，协议自动转换，零配置即用。
 
 接收 Anthropic 格式请求，根据模型名自动路由到对应提供商，协议自动转换，模型即切即用。
