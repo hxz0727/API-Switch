@@ -175,6 +175,20 @@ func openAIModelsEndpoint(baseURL string) string {
 	return baseURL + "/models"
 }
 
+// Ping checks if the provider is reachable via a lightweight /v1/models call.
+func (c *OpenAIClient) Ping() error {
+	endpoint := openAIModelsEndpoint(c.cfg.BaseURL)
+	hc := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
 // ListModels fetches available models from an OpenAI-compatible provider.
 func (c *OpenAIClient) ListModels() ([]string, error) {
 	endpoint := openAIModelsEndpoint(c.cfg.BaseURL)

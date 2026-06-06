@@ -166,7 +166,7 @@ func SetValue(cfg *Config, key, value string) error {
 	parts := strings.SplitN(key, ".", 3)
 	switch len(parts) {
 	case 2:
-		// e.g. providers.anthropic or models.gpt-4o
+		// e.g. server.port or models.gpt-4o
 		switch parts[0] {
 		case "server":
 			switch parts[1] {
@@ -179,6 +179,8 @@ func SetValue(cfg *Config, key, value string) error {
 			default:
 				return fmt.Errorf("unknown config key: %s", key)
 			}
+		case "models":
+			return fmt.Errorf("use `api-switch model add <name> <provider>` to manage models")
 		default:
 			return fmt.Errorf("unknown config key: %s", key)
 		}
@@ -188,7 +190,7 @@ func SetValue(cfg *Config, key, value string) error {
 			provName := parts[1]
 			prov, ok := cfg.Providers[provName]
 			if !ok {
-				prov = ProviderConfig{}
+				return fmt.Errorf("provider %q not found; add it with `api-switch provider add %s --key <key>`", provName, provName)
 			}
 			switch parts[2] {
 			case "api_key":

@@ -88,3 +88,28 @@ func (r *Router) Route(model string) (*RouteResult, error) {
 
 	return result, nil
 }
+
+// RouteTest is a standalone route lookup used by the test command.
+// Unlike Route(), it does not require a running Router instance.
+func RouteTest(cfg *config.Config, model string) (*RouteResult, error) {
+	providerName, provCfg, actualModel, err := cfg.RouteModel(model)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &RouteResult{
+		ProviderType:     provCfg.Type,
+		ProviderName:     providerName,
+		ActualModel:      actualModel,
+		DefaultMaxTokens: provCfg.DefaultMaxTokens,
+	}
+
+	switch provCfg.Type {
+	case "anthropic":
+		result.Anthropic = provider.NewAnthropicClient(provCfg)
+	case "openai":
+		result.OpenAI = provider.NewOpenAIClient(provCfg)
+	}
+
+	return result, nil
+}

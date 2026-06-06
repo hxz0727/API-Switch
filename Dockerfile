@@ -32,8 +32,8 @@ COPY --from=builder /build/api-switch /usr/local/bin/api-switch
 # 默认端口
 EXPOSE 8080
 
-# 默认配置目录
-VOLUME ["/root/.api-switch.yaml"]
+# 配置文件（挂载时用目录，不要挂载文件）
+VOLUME ["/root"]
 
 ENTRYPOINT ["api-switch"]
 CMD ["serve"]

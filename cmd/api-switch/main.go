@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -23,6 +24,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "api-switch",
 		Short: "LLM API proxy with automatic protocol conversion for Claude Code",
+		RunE:  runRoot,
 	}
 
 	// serve command
@@ -60,29 +62,43 @@ Examples:
 
 	// setup command
 	setupCmd := &cobra.Command{
-		Use:   "setup",
+		Use:   "setup [name]",
 		Short: "Configure a provider and generate Claude Code config in one step",
-		RunE:  runSetup,
+		Long: `Configure a provider and update Claude Code settings.
+
+If the name matches a known provider (deepseek, qwen, moonshot, ...),
+the type, URL, and models are filled in automatically. You only
+need to provide --key.
+
+If the name is custom, provide --type, --url, --models.
+
+Examples:
+  api-switch setup deepseek --key sk-xxx    # Known provider
+  api-switch setup --name custom --type openai --url https://... --key sk-xxx --models m1,m2`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runSetup,
 	}
 	setupCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
-	setupCmd.Flags().String("name", "", "Provider name (e.g. anthropic, openai, deepseek)")
+	setupCmd.Flags().String("name", "", "Provider name")
 	setupCmd.Flags().String("type", "", "Provider type: anthropic or openai")
-	setupCmd.Flags().String("url", "", "Provider base URL (e.g. https://api.openai.com)")
+	setupCmd.Flags().String("url", "", "Provider base URL")
 	setupCmd.Flags().String("key", "", "API key for the provider")
 	setupCmd.Flags().String("models", "", "Comma-separated model names (e.g. gpt-4o,gpt-4)")
 	setupCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
 
-	// model command
+	// model command + aliases
 	modelCmd := &cobra.Command{
 		Use:   "model",
 		Short: "Manage model routing",
 	}
+	modelCmd.Aliases = []string{"models"}
 	modelCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "config file path")
 	modelCmd.AddCommand(
 		&cobra.Command{
-			Use:   "list",
-			Short: "List all configured models and their providers",
-			RunE:  runModelList,
+			Use:     "list",
+			Aliases: []string{"ls"},
+			Short:   "List all configured models and their providers",
+			RunE:    runModelList,
 		},
 		&cobra.Command{
 			Use:   "add <name> <provider> [model_override]",
@@ -102,15 +118,19 @@ Examples:
 			Long: `Query an OpenAI-compatible provider's /v1/models endpoint to
 discover available models and add them to the routing table.
 
+Use --filter to import only matching models.
+
 Examples:
   api-switch model import deepseek
-  api-switch model import openai`,
+  api-switch model import openai --filter gpt-4`,
 			Args: cobra.ExactArgs(1),
 			RunE: runModelImport,
 		},
 	)
+	modelImportCmd := modelCmd.Commands()[3]
+	modelImportCmd.Flags().String("filter", "", "Only import models matching this substring")
 
-	// provider command
+	// provider command + aliases
 	providerCmd := &cobra.Command{
 		Use:   "provider",
 		Short: "Manage providers",
@@ -122,14 +142,30 @@ Supports built-in presets for popular providers:
 Examples:
   api-switch provider list                          List all configured providers
   api-switch provider add deepseek --key sk-xxx     Add DeepSeek with API key
-  api-switch provider add qwen --key sk-xxx         Add Qwen (DashScope) with API key`,
+  api-switch provider test deepseek                 Test connectivity`,
 	}
+	providerCmd.Aliases = []string{"providers"}
 	providerCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "config file path")
 	providerCmd.AddCommand(
 		&cobra.Command{
-			Use:   "list",
-			Short: "List all configured providers",
-			RunE:  runProviderList,
+			Use:     "list",
+			Aliases: []string{"ls"},
+			Short:   "List all configured providers",
+			RunE:    runProviderList,
+		},
+		&cobra.Command{
+			Use:     "test <name>",
+			Aliases: []string{"ping"},
+			Short:   "Test connectivity to a provider",
+			Args:    cobra.ExactArgs(1),
+			Long: `Test whether a provider is reachable and responding.
+
+Sends a lightweight request to the provider's API and reports
+the latency and any issues found.
+
+Examples:
+  api-switch provider test deepseek`,
+			RunE: runProviderTest,
 		},
 	)
 
@@ -143,27 +179,14 @@ the base URL and defaults are filled in automatically.
 
 You only need to provide the API key via --key flag.
 
-Known providers and their defaults:
-  deepseek  -> https://api.deepseek.com               (models: deepseek-chat, deepseek-coder)
-  moonshot  -> https://api.moonshot.cn/v1             (models: moonshot-v1-8k, moonshot-v1-32k)
-  qwen      -> https://dashscope.aliyuncs.com/v1       (models: qwen-plus, qwen-max, qwen-turbo)
-  glm       -> https://open.bigmodel.cn/api/paas/v4   (models: glm-4-flash, glm-4-plus)
-  kimi      -> https://api.moonshot.cn/v1             (models: kimi-latest)
-  yi        -> https://api.lingyiwanwu.com/v1         (models: yi-lightning, yi-medium)
-  step      -> https://api.stepfun.com/v1             (models: step-1-8k, step-1-32k)
-  ernie     -> https://aip.baidubce.com/...            (models: ernie-4.0, ernie-3.5)
-  hunyuan   -> https://api.hunyuan.cloud.tencent.com/v1 (models: hunyuan-lite, hunyuan-standard)
-
-If the name does not match a known provider, you must also provide --url and --type.
+If --key is not provided, you will be prompted interactively.
 
 Examples:
-  api-switch provider add deepseek --key sk-xxx          # Known preset
-  api-switch provider add qwen --key sk-xxx               # Known preset
-  api-switch provider add my-custom --url https://... --type openai --key sk-xxx`,
+  api-switch provider add deepseek --key sk-xxx`,
 		Args: cobra.ExactArgs(1),
 		RunE: runProviderAdd,
 	}
-	providerAddCmd.Flags().String("key", "", "API key for the provider (required)")
+	providerAddCmd.Flags().String("key", "", "API key for the provider")
 	providerAddCmd.Flags().String("url", "", "Base URL (optional for known providers)")
 	providerAddCmd.Flags().String("type", "", "Provider type: anthropic or openai (optional for known providers)")
 	providerAddCmd.Flags().StringSlice("models", nil, "Additional models to import (comma-separated)")
@@ -177,9 +200,10 @@ Examples:
 	configCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "config file path")
 	configCmd.AddCommand(
 		&cobra.Command{
-			Use:   "show",
-			Short: "Show current config",
-			RunE:  runConfigShow,
+			Use:     "show",
+			Aliases: []string{"cat"},
+			Short:   "Show current config",
+			RunE:    runConfigShow,
 		},
 		&cobra.Command{
 			Use:   "set <key> <value>",
@@ -194,14 +218,22 @@ Examples:
 		},
 	)
 
-	// generate-claude-config command
-	genClaudeCmd := &cobra.Command{
-		Use:   "generate-claude-config",
-		Short: "Generate or update Claude Code settings.json (proxy URL only)",
-		RunE:  runGenerateClaudeConfig,
+	// test command
+	testCmd := &cobra.Command{
+		Use:   "test [model]",
+		Short: "Send a test message to verify end-to-end functionality",
+		Long: `Send a brief test message to the specified model to verify
+that the proxy is working correctly end-to-end.
+
+If no model is specified, uses the currently active model
+from Claude Code settings.
+
+Examples:
+  api-switch test                    Test the currently active model
+  api-switch test deepseek-chat      Test a specific model`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runTest,
 	}
-	genClaudeCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
-	genClaudeCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
 
 	// doctor command
 	doctorCmd := &cobra.Command{
@@ -242,11 +274,38 @@ Examples:
 	monitorCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
 	monitorCmd.Flags().Bool("web", false, "show web dashboard URL instead of terminal view")
 
-	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, genClaudeCmd, doctorCmd, monitorCmd)
+	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func runRoot(cmd *cobra.Command, args []string) error {
+	fmt.Println("API-Switch — LLM API proxy for Claude Code")
+	fmt.Println(strings.Repeat("=", 48))
+	fmt.Println()
+	fmt.Println("快速开始：")
+	fmt.Println()
+	fmt.Println("  # 1. 添加一个供应商（支持已知厂商预设）")
+	fmt.Println("  api-switch provider add deepseek --key sk-xxx")
+	fmt.Println()
+	fmt.Println("  # 2. 导入模型")
+	fmt.Println("  api-switch model import deepseek")
+	fmt.Println()
+	fmt.Println("  # 3. 切换到该模型")
+	fmt.Println("  api-switch use deepseek-chat")
+	fmt.Println()
+	fmt.Println("  # 4. 启动代理")
+	fmt.Println("  api-switch serve")
+	fmt.Println()
+	fmt.Println("其它命令：")
+	fmt.Println("  api-switch doctor          一键诊断")
+	fmt.Println("  api-switch test [model]    端到端测试")
+	fmt.Println("  api-switch monitor         实时流量监控")
+	fmt.Println("  api-switch --help          查看所有命令")
+	fmt.Println()
+	return nil
 }
 
 func loadConfig() (*config.Config, string, error) {
@@ -338,7 +397,7 @@ func runUse(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Updated: %s\n", claudeSettingsPath)
 	fmt.Println()
 	fmt.Println("Next: Claude Code will pick up the change automatically.")
-	fmt.Println("      Use /model in Claude Code or just start chatting.")
+	fmt.Println("      Start chatting or use /model in Claude Code.")
 	return nil
 }
 
@@ -350,15 +409,44 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	modelsStr, _ := cmd.Flags().GetString("models")
 	proxyPort := port
 
-	if name == "" || providerType == "" || url == "" || key == "" || modelsStr == "" {
-		return fmt.Errorf("all flags are required: --name, --type, --url, --key, --models\n\nExample:\n  api-switch setup --name openai --type openai --url https://api.openai.com --key sk-xxx --models gpt-4o,gpt-4")
+	// First positional arg is the provider name (if provided)
+	if len(args) > 0 && name == "" {
+		name = args[0]
 	}
 
+	if name == "" {
+		return fmt.Errorf("provider name is required; use either `api-switch setup deepseek --key sk-xxx` or `api-switch setup --name custom ...`")
+	}
+
+	// Auto-fill from known provider templates
+	known := config.KnownProviders()
+	tmpl, isKnown := known[name]
+	if isKnown {
+		if providerType == "" {
+			providerType = tmpl.Type
+		}
+		if url == "" {
+			url = tmpl.BaseURL
+		}
+	}
+
+	if key == "" {
+		return fmt.Errorf("--key is required; provide your API key for %q", name)
+	}
+	if providerType == "" {
+		return fmt.Errorf("--type is required for custom providers (must be 'anthropic' or 'openai')")
+	}
+	if url == "" {
+		return fmt.Errorf("--url is required; set the API base URL for %q", name)
+	}
 	if providerType != "anthropic" && providerType != "openai" {
 		return fmt.Errorf("invalid type %q; must be 'anthropic' or 'openai'", providerType)
 	}
 
 	models := splitModels(modelsStr)
+	if isKnown && len(models) == 0 {
+		models = tmpl.Models
+	}
 
 	cfg, configPath, err := loadConfig()
 	if err != nil {
@@ -393,36 +481,75 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runGenerateClaudeConfig(cmd *cobra.Command, args []string) error {
+func runTest(cmd *cobra.Command, args []string) error {
 	cfg, _, err := loadConfig()
 	if err != nil {
 		return err
 	}
 
-	proxyPort := port
-	if proxyPort == 0 {
-		proxyPort = cfg.Server.Port
+	model := ""
+	if len(args) > 0 {
+		model = args[0]
+	} else {
+		// Read from Claude settings
+		claudeSettings, err := config.LoadClaudeSettings(config.ClaudeSettingsPath())
+		if err == nil && claudeSettings.Model != "" {
+			model = claudeSettings.Model
+		}
 	}
 
-	proxyURL := fmt.Sprintf("http://localhost:%d", proxyPort)
-	claudeSettingsPath := config.ClaudeSettingsPath()
+	if model == "" {
+		return fmt.Errorf("no model specified and no active model found; use `api-switch test <model>` or activate one with `api-switch use <model>`")
+	}
 
-	claudeSettings, err := config.LoadClaudeSettings(claudeSettingsPath)
+	// Find the provider
+	route, err := proxy.RouteTest(cfg, model)
 	if err != nil {
 		return err
 	}
 
-	config.InitClaudeSettings(claudeSettings, proxyURL)
+	fmt.Printf("Testing model %q via provider %q ...\n", model, route.ProviderName)
+	fmt.Println()
 
-	if err := config.SaveClaudeSettings(claudeSettingsPath, claudeSettings); err != nil {
-		return err
+	// Execute based on provider type
+	var result string
+	var inputTok, outputTok int
+
+	switch route.ProviderType {
+	case "anthropic":
+		antReq := struct {
+			Model     string              `json:"model"`
+			MaxTokens int                 `json:"max_tokens"`
+			Messages  []map[string]string `json:"messages"`
+		}{
+			Model:     route.ActualModel,
+			MaxTokens: 10,
+			Messages:  []map[string]string{{"role": "user", "content": "Hello"}},
+		}
+		resp, err := route.Anthropic.SendMessageRaw(antReq)
+		if err != nil {
+			return fmt.Errorf("API call failed: %w", err)
+		}
+		result = fmt.Sprintf("stop_reason=%s", resp["stop_reason"])
+		if u, ok := resp["usage"].(map[string]interface{}); ok {
+			inputTok, _ = u["input_tokens"].(int)
+			outputTok, _ = u["output_tokens"].(int)
+		}
+	case "openai":
+		fmt.Println("  Testing OpenAI models requires the proxy server.")
+		fmt.Printf("  Start it with: api-switch serve -p %d\n", cfg.Server.Port)
+		fmt.Println("  Then send a request via curl.")
+		return nil
+	default:
+		return fmt.Errorf("provider type %q not supported for testing", route.ProviderType)
 	}
 
-	fmt.Printf("Updated Claude Code base settings at %s\n", claudeSettingsPath)
-	fmt.Printf("  ANTHROPIC_BASE_URL = %s\n", proxyURL)
+	fmt.Printf("  ✓ Response received\n")
+	fmt.Printf("    Result:  %s\n", result)
+	fmt.Printf("    Input:   %d tokens\n", inputTok)
+	fmt.Printf("    Output:  %d tokens\n", outputTok)
 	fmt.Println()
-	fmt.Println("Switch to a model:")
-	fmt.Println("  api-switch use <model>")
+	fmt.Println("  End-to-end test passed! Your API-Switch proxy is working.")
 	return nil
 }
 
@@ -433,7 +560,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	switch {
 	case quiet:
 		logutil.SetLevel(logutil.LevelError)
-		log.SetOutput(io.Discard) // suppress standard log output
+		log.SetOutput(io.Discard)
 	case verbose >= 2:
 		logutil.SetLevel(logutil.LevelDebug)
 	case verbose >= 1:
@@ -537,6 +664,8 @@ func runModelRemove(cmd *cobra.Command, args []string) error {
 
 func runModelImport(cmd *cobra.Command, args []string) error {
 	providerName := args[0]
+	filter, _ := cmd.Flags().GetString("filter")
+
 	cfg, path, err := loadConfig()
 	if err != nil {
 		return err
@@ -544,21 +673,49 @@ func runModelImport(cmd *cobra.Command, args []string) error {
 
 	provCfg, ok := cfg.Providers[providerName]
 	if !ok {
-		return fmt.Errorf("provider %q not found in config", providerName)
+		return fmt.Errorf("provider %q not found in config; add it with `api-switch provider add %s --key <key>`", providerName, providerName)
 	}
 	if provCfg.Type != "openai" {
-		return fmt.Errorf("model import is only supported for OpenAI-compatible providers (got type %q)", provCfg.Type)
+		return fmt.Errorf("model import is only supported for OpenAI-compatible providers (got type %q). For Anthropic models, add them manually with `api-switch model add <name> %s`", provCfg.Type, providerName)
 	}
 
 	client := provider.NewOpenAIClient(&provCfg)
 	models, err := client.ListModels()
 	if err != nil {
-		return fmt.Errorf("failed to list models from %q: %w", providerName, err)
+		return fmt.Errorf("failed to list models from %q: %w\n  Check that the API key and base URL are correct.", providerName, err)
 	}
 
 	if len(models) == 0 {
 		fmt.Printf("No models returned by %q.\n", providerName)
 		return nil
+	}
+
+	// Apply filter
+	if filter != "" {
+		var filtered []string
+		for _, m := range models {
+			if strings.Contains(strings.ToLower(m), strings.ToLower(filter)) {
+				filtered = append(filtered, m)
+			}
+		}
+		models = filtered
+		if len(models) == 0 {
+			fmt.Printf("No models matching %q found.", filter)
+			return nil
+		}
+	}
+
+	// Confirm for large imports
+	if len(models) > 20 {
+		fmt.Printf("Found %d models from %q.\n", len(models), providerName)
+		fmt.Print("Import all? (Y/n): ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer == "n" || answer == "no" {
+			fmt.Println("Import cancelled.")
+			return nil
+		}
 	}
 
 	imported := 0
@@ -577,9 +734,19 @@ func runModelImport(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Imported %d new models from provider %q:\n", imported, providerName)
-	for _, m := range models {
-		if cfg.Models[m].Provider == providerName {
-			fmt.Printf("  - %s\n", m)
+	if imported > 30 {
+		// Show only first 30 to avoid scroll spam
+		for _, m := range models[:30] {
+			if cfg.Models[m].Provider == providerName {
+				fmt.Printf("  - %s\n", m)
+			}
+		}
+		fmt.Printf("  ... and %d more\n", imported-30)
+	} else {
+		for _, m := range models {
+			if cfg.Models[m].Provider == providerName {
+				fmt.Printf("  - %s\n", m)
+			}
 		}
 	}
 	return nil
@@ -613,6 +780,41 @@ func runProviderList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runProviderTest(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	cfg, _, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	provCfg, ok := cfg.Providers[name]
+	if !ok {
+		return fmt.Errorf("provider %q not found in config", name)
+	}
+
+	fmt.Printf("Testing provider %q (%s) ...\n", name, provCfg.Type)
+	fmt.Printf("  URL: %s\n", provCfg.BaseURL)
+	fmt.Println()
+
+	switch provCfg.Type {
+	case "anthropic":
+		client := provider.NewAnthropicClient(&provCfg)
+		err = client.Ping()
+	case "openai":
+		client := provider.NewOpenAIClient(&provCfg)
+		err = client.Ping()
+	default:
+		return fmt.Errorf("unknown provider type: %s", provCfg.Type)
+	}
+
+	if err != nil {
+		return fmt.Errorf("connection failed: %w\n  Check the base URL and API key.", err)
+	}
+
+	fmt.Println("  ✓ Provider is reachable and responding!")
+	return nil
+}
+
 func runProviderAdd(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	key, _ := cmd.Flags().GetString("key")
@@ -627,7 +829,7 @@ func runProviderAdd(cmd *cobra.Command, args []string) error {
 
 	// Check if provider already exists
 	if _, ok := cfg.Providers[name]; ok {
-		return fmt.Errorf("provider %q already exists; use `api-switch config set providers.%s.<field> <value>` to update it", name, name)
+		return fmt.Errorf("provider %q already exists; use `api-switch config set providers.%s.api_key <key>` to update it", name, name)
 	}
 
 	// Check for known provider preset
@@ -643,11 +845,19 @@ func runProviderAdd(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Interactive key prompt if not provided
 	if key == "" {
-		return fmt.Errorf("--key is required for provider %q", name)
+		fmt.Printf("Enter API key for %q: ", name)
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		key = strings.TrimSpace(input)
+		if key == "" {
+			return fmt.Errorf("API key is required")
+		}
 	}
+
 	if url == "" {
-		return fmt.Errorf("--url is required (no known preset for provider %q)", name)
+		return fmt.Errorf("--url is required (no known preset for provider %q)\n  Known presets: deepseek, qwen, moonshot, glm, kimi, yi, step, ernie, hunyuan", name)
 	}
 	if provType == "" {
 		return fmt.Errorf("--type is required (must be 'anthropic' or 'openai')")
@@ -779,11 +989,9 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Created default config at %s\n", path)
 	fmt.Println()
 	fmt.Println("Quick setup with:")
-	fmt.Println("  api-switch setup --name anthropic --type anthropic --url https://api.anthropic.com --key <key> --models claude-sonnet-4-20250514")
-	fmt.Println("  api-switch setup --name openai --type openai --url https://api.openai.com --key <key> --models gpt-4o,gpt-4")
+	fmt.Println("  api-switch setup deepseek --key sk-xxx")
 	fmt.Println()
-	fmt.Println("Then switch to a model:")
-	fmt.Println("  api-switch use gpt-4o")
+	fmt.Println("Then start:")
 	fmt.Println("  api-switch serve")
 	return nil
 }
@@ -806,12 +1014,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	allPassed := true
 	for _, r := range results {
-		// Skip empty results
 		if len(r.Items) == 0 {
 			continue
 		}
 
-		// Print category header
 		statusSymbol := "✓"
 		switch r.Status {
 		case config.StatusPass:

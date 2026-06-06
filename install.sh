@@ -144,6 +144,8 @@ echo "  # 更多帮助"
 echo "  api-switch --help"
 echo "  api-switch doctor    # 一键诊断"
 echo ""
+echo "  # 启用 Tab 补全（添加到 ~/.bashrc 永久生效）"
+echo '  source <(api-switch completion bash)'
 
 # 检测 Claude Code
 if command -v claude &>/dev/null; then

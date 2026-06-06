@@ -124,6 +124,7 @@ func (t *Tracker) Stats() map[string]interface{} {
 
 	stats := map[string]interface{}{
 		"total_requests": totalRequests,
+		"lifetime":       t.counter,
 		"capacity":       t.capacity,
 		"models":         modelCounts,
 		"status":         statusCounts,
