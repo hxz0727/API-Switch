@@ -19,7 +19,7 @@ const { join } = require("path");
 const { execSync } = require("child_process");
 
 const PKG = require("./package.json");
-const DOWNLOAD_VERSION = "v0.2.0";
+const DOWNLOAD_VERSION = "v0.2.1";
 const GH_RELEASE = `https://github.com/hxz0727/API-Switch/releases/download/${DOWNLOAD_VERSION}`;
 const BIN_DIR = join(__dirname, "bin");
 
