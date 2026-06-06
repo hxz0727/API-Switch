@@ -55,7 +55,20 @@ api-switch serve
 
 ## 📦 安装
 
-### 方式一：一键安装脚本（推荐）
+### 方式一：npm 安装（推荐）
+
+```bash
+# 全局安装
+npm install -g api-switch
+
+# 或直接使用（无需安装）
+npx api-switch provider add deepseek --key sk-xxx
+npx api-switch serve
+```
+
+npm 包自动下载对应平台的预编译二进制，无需 Go 环境。
+
+### 方式二：一键安装脚本
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/hxz0727/API-Switch/master/install.sh | bash
@@ -67,7 +80,7 @@ chmod +x install.sh && ./install.sh
 
 脚本会自动：检查/安装 Go → 克隆仓库 → 编译二进制 → 添加到 PATH。
 
-### 方式二：Docker 部署
+### 方式三：Docker 部署
 
 ```bash
 docker build -t api-switch .
@@ -77,7 +90,7 @@ docker run -d -p 8080:8080 \
   api-switch
 ```
 
-### 方式三：手动编译
+### 方式四：手动编译
 
 ```bash
 git clone https://github.com/hxz0727/API-Switch.git
@@ -85,11 +98,6 @@ cd API-Switch
 make build              # 或 go build -o api-switch ./cmd/api-switch/
 make install            # 安装到 ~/.local/bin/
 ```
-
-### 前置依赖
-
-- Go 1.21+（脚本可自动安装）
-- Claude Code（已安装并登录）
 
 ## 🎯 命令参考
 

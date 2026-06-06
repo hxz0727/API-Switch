@@ -1,0 +1,32 @@
+{
+  "name": "api-switch",
+  "version": "1.1.0",
+  "description": "LLM API proxy for Claude Code — route to DeepSeek, Qwen, GLM, and more",
+  "bin": {
+    "api-switch": "bin/api-switch"
+  },
+  "scripts": {
+    "postinstall": "node install.js",
+    "postupdate": "node install.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hxz0727/API-Switch.git"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "llm",
+    "proxy",
+    "deepseek",
+    "qwen",
+    "openai"
+  ],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/hxz0727/API-Switch/issues"
+  },
+  "homepage": "https://github.com/hxz0727/API-Switch#readme",
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"]
+}
