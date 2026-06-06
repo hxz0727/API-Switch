@@ -18,7 +18,7 @@ const { execSync } = require("child_process");
 
 const PKG = require("./package.json");
 // Download version — points to the GitHub release tag independent of npm version
-const DOWNLOAD_VERSION = "v1.2.0";
+const DOWNLOAD_VERSION = "v0.2.0";
 const BASE = `https://github.com/hxz0727/API-Switch/releases/download/${DOWNLOAD_VERSION}`;
 const BIN_DIR = join(__dirname, "bin");
 

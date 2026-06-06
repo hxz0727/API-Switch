@@ -1,6 +1,6 @@
 {
   "name": "@hxz0727/api-switch-cc",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "LLM API proxy for Claude Code — route to DeepSeek, Qwen, GLM, and more",
   "bin": {
     "api-switch": "bin/api-switch"
