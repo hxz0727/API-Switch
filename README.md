@@ -59,11 +59,11 @@ api-switch serve
 
 ```bash
 # 全局安装
-npm install -g api-switch
+npm install -g @hxz0727/api-switch
 
 # 或直接使用（无需安装）
-npx api-switch provider add deepseek --key sk-xxx
-npx api-switch serve
+npx @hxz0727/api-switch provider add deepseek --key sk-xxx
+npx @hxz0727/api-switch serve
 ```
 
 npm 包自动下载对应平台的预编译二进制，无需 Go 环境。
