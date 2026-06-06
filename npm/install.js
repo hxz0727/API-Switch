@@ -6,8 +6,8 @@
  * On postinstall, downloads the correct pre-built binary for the
  * current platform from GitHub Releases and caches it locally.
  *
- * Usage: npx api-switch <command>
- *        npm install -g api-switch && api-switch serve
+ * Usage: npx api-switch-cc <command>
+ *        npm install -g api-switch-cc && api-switch serve
  */
 
 "use strict";
@@ -17,8 +17,9 @@ const { join } = require("path");
 const { execSync } = require("child_process");
 
 const PKG = require("./package.json");
-const VER = PKG.version;
-const BASE = `https://github.com/hxz0727/API-Switch/releases/download/v${VER}`;
+// Download version — points to the GitHub release tag independent of npm version
+const DOWNLOAD_VERSION = "v1.1.0";
+const BASE = `https://github.com/hxz0727/API-Switch/releases/download/${DOWNLOAD_VERSION}`;
 const BIN_DIR = join(__dirname, "bin");
 
 // ── Platform detection ──────────────────────────────
@@ -65,7 +66,7 @@ function install() {
   const url = `${BASE}/${archive}`;
   const tmp = join(__dirname, `_${archive}`);
 
-  console.log(`Downloading api-switch v${VER} for ${plat} ...`);
+  console.log(`Downloading api-switch v${DOWNLOAD_VERSION} for ${plat} ...`);
 
   try {
     // Download
