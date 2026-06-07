@@ -25,6 +25,10 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **批量导入** — 自动拉取 API 可用模型列表
 - **端到端测试** — `api-switch test [model]` 验证代理是否正常工作
 - **provider 连通性检测** — `api-switch provider test <name>` 测试厂商 API 是否可达
+- **用量统计** — `api-switch usage` 按天统计 Token 用量、缓存命中率
+- **国内镜像** — Gitee 同步 + goproxy.cn 加速安装
+
+> **v0.4.0** — 新增用量统计、缓存命中率追踪、Gitee 镜像
 
 ## ⚡ 快速开始
 
@@ -219,6 +223,16 @@ api-switch serve -q                     # 仅显示错误
 api-switch serve -v                     # 带请求详情
 
 # 配置热加载：修改 ~/.api-switch.yaml 后自动生效
+```
+
+### 用量统计
+
+```bash
+# 按天查看 Token 用量和缓存命中率
+api-switch usage
+
+# 重置统计
+api-switch usage --reset
 ```
 
 ### 监控与诊断
