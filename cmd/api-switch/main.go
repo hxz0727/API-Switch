@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,7 @@ import (
 	"github.com/hxz0727/API-Switch/internal/logutil"
 	"github.com/hxz0727/API-Switch/internal/provider"
 	"github.com/hxz0727/API-Switch/internal/proxy"
+	usageutil "github.com/hxz0727/API-Switch/internal/usage"
 )
 
 var (
@@ -277,6 +279,22 @@ Examples:
 	monitorCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
 	monitorCmd.Flags().Bool("web", false, "show web dashboard URL instead of terminal view")
 
+	// usage command
+	usageCmd := &cobra.Command{
+		Use:     "usage",
+		Aliases: []string{"stats"},
+		Short:   "Show token usage statistics (daily and total)",
+		Long: `Display token usage statistics for the API-Switch proxy.
+
+Shows daily breakdown and lifetime totals of input/output tokens.
+
+Examples:
+  api-switch usage              Show usage summary
+  api-switch usage --reset      Reset all usage statistics`,
+		RunE: runUsage,
+	}
+	usageCmd.Flags().Bool("reset", false, "Reset all usage statistics")
+
 	// version command
 	versionCmd := &cobra.Command{
 		Use:     "version",
@@ -288,7 +306,7 @@ Examples:
 		},
 	}
 
-	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd, versionCmd)
+	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd, usageCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -1102,6 +1120,75 @@ func runMonitor(cmd *cobra.Command, args []string) error {
 	if err := proxy.MonitorConnect(addr); err != nil {
 		return fmt.Errorf("monitor error: %w", err)
 	}
+	return nil
+}
+
+func runUsage(cmd *cobra.Command, args []string) error {
+	reset, _ := cmd.Flags().GetBool("reset")
+
+	ut, err := usageutil.NewTracker(proxy.DefaultUsagePath())
+	if err != nil {
+		return fmt.Errorf("failed to load usage data: %w", err)
+	}
+
+	if reset {
+		if err := ut.Reset(); err != nil {
+			return fmt.Errorf("failed to reset usage: %w", err)
+		}
+		fmt.Println("Usage statistics reset.")
+		return nil
+	}
+
+	snap := ut.Snapshot()
+
+	if snap.TotalRequests == 0 {
+		fmt.Println("No usage data yet. Start the proxy with `api-switch serve` to begin tracking.")
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("  API-Switch 用量统计")
+	fmt.Println("  " + strings.Repeat("=", 55))
+	fmt.Println()
+
+	// Show daily breakdown (sorted by date descending)
+	if len(snap.Daily) > 0 {
+		fmt.Printf("  %-12s %8s %8s %10s\n", "日期", "请求数", "Token数", "出错")
+		fmt.Println("  " + strings.Repeat("-", 48))
+		var dates []string
+		for d := range snap.Daily {
+			dates = append(dates, d)
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(dates)))
+		for _, d := range dates {
+			daily := snap.Daily[d]
+			total := daily.InputTokens + daily.OutputTokens
+			errs := ""
+			if daily.Errors > 0 {
+				errs = fmt.Sprintf("%d", daily.Errors)
+			} else {
+				errs = "-"
+			}
+			fmt.Printf("  %-12s %8d %8d %10s\n", d, daily.Requests, total, errs)
+		}
+		fmt.Println()
+	}
+
+	// Lifetime totals
+	fmt.Printf("  总用量：\n")
+	fmt.Printf("    请求数:    %d\n", snap.TotalRequests)
+	fmt.Printf("    Token数:   %d (输入 %d + 输出 %d)\n",
+		snap.TotalInputTokens+snap.TotalOutputTokens,
+		snap.TotalInputTokens, snap.TotalOutputTokens)
+	if snap.TotalErrors > 0 {
+		fmt.Printf("    出错:      %d\n", snap.TotalErrors)
+	}
+
+	fmt.Println()
+	fmt.Println("  数据文件: " + proxy.DefaultUsagePath())
+	fmt.Println("  重置:     api-switch usage --reset")
+	fmt.Println()
+
 	return nil
 }
 

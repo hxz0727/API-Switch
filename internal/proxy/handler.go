@@ -15,6 +15,7 @@ import (
 	"github.com/hxz0727/API-Switch/internal/logutil"
 	"github.com/hxz0727/API-Switch/internal/monitor"
 	"github.com/hxz0727/API-Switch/internal/streaming"
+	"github.com/hxz0727/API-Switch/internal/usage"
 	"github.com/hxz0727/API-Switch/pkg/anthropic"
 	"github.com/hxz0727/API-Switch/pkg/openai"
 )
@@ -22,20 +23,37 @@ import (
 // Server is the HTTP proxy server for Claude Code.
 // It accepts Anthropic Messages API requests and routes them to the correct provider.
 type Server struct {
-	cfg       *config.Config
-	cfgPath   string
-	router    *Router
-	tracker   *monitor.Tracker
-	mu        sync.Mutex
+	cfg          *config.Config
+	cfgPath      string
+	router       *Router
+	tracker      *monitor.Tracker
+	usageTracker *usage.Tracker
+	mu           sync.Mutex
+}
+
+// DefaultUsagePath returns the default usage data file path.
+func DefaultUsagePath() string {
+	return filepath.Join(filepath.Dir(config.DefaultConfigPath()), ".api-switch", "usage.json")
+}
+
+// initUsageTracker loads or creates a usage tracker.
+func initUsageTracker() *usage.Tracker {
+	ut, err := usage.NewTracker(DefaultUsagePath())
+	if err != nil {
+		logutil.Warn("Failed to init usage tracker: %v", err)
+	}
+	return ut
 }
 
 // NewServer creates a new proxy server.
 func NewServer(cfg *config.Config) *Server {
-	return &Server{
-		cfg:     cfg,
-		router:  NewRouter(cfg),
-		tracker: monitor.NewTracker(1000),
+	s := &Server{
+		cfg:          cfg,
+		router:       NewRouter(cfg),
+		tracker:      monitor.NewTracker(1000),
+		usageTracker: initUsageTracker(),
 	}
+	return s
 }
 
 // StartWithConfigFile starts the HTTP server with config file path for hot-reload.
@@ -198,9 +216,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	switch route.ProviderType {
 	case "anthropic":
-		s.handleAnthropic(r.Context(), w, &antReq, route)
+		s.handleAnthropic(r.Context(), w, &antReq, route, ev)
 	case "openai":
-		s.handleOpenAI(r.Context(), w, &antReq, route)
+		s.handleOpenAI(r.Context(), w, &antReq, route, ev)
 	default:
 		writeAnthropicError(w, http.StatusInternalServerError, "unknown_provider_type",
 			fmt.Sprintf("provider type %q is not supported", route.ProviderType))
@@ -210,6 +228,10 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	ev.Duration = time.Since(ev.Timestamp)
 	s.tracker.Record(ev)
+	if s.usageTracker != nil {
+		s.usageTracker.Record(ev.InputTokens, ev.OutputTokens, ev.Status == "error")
+		_ = s.usageTracker.Save()
+	}
 }
 
 // closeOnCancel closes the given Closer when the context is cancelled.
@@ -222,24 +244,29 @@ func closeOnCancel(ctx context.Context, closer io.Closer) {
 }
 
 // handleAnthropic handles requests for Anthropic models (direct passthrough).
-func (s *Server) handleAnthropic(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
+func (s *Server) handleAnthropic(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult, ev *monitor.RequestEvent) {
 	// Override model name if mapped
 	antReq.Model = route.ActualModel
 
 	if antReq.Stream {
-		s.handleAnthropicStreaming(ctx, w, antReq, route)
+		s.handleAnthropicStreaming(ctx, w, antReq, route, ev)
 	} else {
-		s.handleAnthropicNonStreaming(w, antReq, route)
+		s.handleAnthropicNonStreaming(w, antReq, route, ev)
 	}
 }
 
-func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
+func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult, ev *monitor.RequestEvent) {
 	antResp, err := route.Anthropic.SendMessage(antReq)
 	if err != nil {
 		logutil.Error("Anthropic API error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
+		ev.Status = "error"
+		ev.Error = err.Error()
 		return
 	}
+
+	ev.InputTokens = antResp.Usage.InputTokens
+	ev.OutputTokens = antResp.Usage.OutputTokens
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(antResp); err != nil {
@@ -247,11 +274,13 @@ func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anth
 	}
 }
 
-func (s *Server) handleAnthropicStreaming(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
+func (s *Server) handleAnthropicStreaming(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult, ev *monitor.RequestEvent) {
 	respBody, err := route.Anthropic.StreamMessage(antReq)
 	if err != nil {
 		logutil.Error("Anthropic streaming error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
+		ev.Status = "error"
+		ev.Error = err.Error()
 		return
 	}
 	defer respBody.Close()
@@ -270,7 +299,7 @@ func (s *Server) handleAnthropicStreaming(ctx context.Context, w http.ResponseWr
 }
 
 // handleOpenAI handles requests for OpenAI-protocol models (protocol conversion).
-func (s *Server) handleOpenAI(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult) {
+func (s *Server) handleOpenAI(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult, ev *monitor.RequestEvent) {
 	// Get default max tokens from route (populated by router under lock)
 	defaultMaxTokens := route.DefaultMaxTokens
 
@@ -286,19 +315,24 @@ func (s *Server) handleOpenAI(ctx context.Context, w http.ResponseWriter, antReq
 	}
 
 	if antReq.Stream {
-		s.handleOpenAIStreaming(ctx, w, oaiReq, route, antReq.Model)
+		s.handleOpenAIStreaming(ctx, w, oaiReq, route, antReq.Model, ev)
 	} else {
-		s.handleOpenAINonStreaming(w, oaiReq, route, antReq.Model)
+		s.handleOpenAINonStreaming(w, oaiReq, route, antReq.Model, ev)
 	}
 }
 
-func (s *Server) handleOpenAINonStreaming(w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string) {
+func (s *Server) handleOpenAINonStreaming(w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string, ev *monitor.RequestEvent) {
 	oaiResp, err := route.OpenAI.SendMessage(oaiReq)
 	if err != nil {
 		logutil.Error("OpenAI API error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
+		ev.Status = "error"
+		ev.Error = err.Error()
 		return
 	}
+
+	ev.InputTokens = oaiResp.Usage.PromptTokens
+	ev.OutputTokens = oaiResp.Usage.CompletionTokens
 
 	// Convert OpenAI response → Anthropic response
 	antResp := ConvertOpenAIToAnthropic(oaiResp, requestedModel)
@@ -308,11 +342,13 @@ func (s *Server) handleOpenAINonStreaming(w http.ResponseWriter, oaiReq *openai.
 	}
 }
 
-func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string) {
+func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string, ev *monitor.RequestEvent) {
 	respBody, err := route.OpenAI.StreamMessage(oaiReq)
 	if err != nil {
 		logutil.Error("OpenAI streaming error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
+		ev.Status = "error"
+		ev.Error = err.Error()
 		return
 	}
 	defer respBody.Close()
@@ -328,6 +364,7 @@ func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWrite
 
 	// Estimate input tokens from request
 	inputTokens := estimateInputTokens(oaiReq)
+	ev.InputTokens = inputTokens
 
 	if err := streaming.OpenAIToAnthropicStream(respBody, w, flusher, canFlush, requestedModel, inputTokens); err != nil {
 		logutil.Error("OpenAI→Anthropic streaming conversion error: %v", err)

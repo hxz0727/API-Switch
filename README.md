@@ -230,6 +230,12 @@ api-switch monitor --web
 # 终端实时监控
 api-switch monitor
 
+# 用量统计（按天/总 Token 数）
+api-switch usage
+
+# 重置用量统计
+api-switch usage --reset
+
 # 一键诊断
 api-switch doctor
 ```
