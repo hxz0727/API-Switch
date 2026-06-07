@@ -75,6 +75,13 @@ npx api-switch-cc serve
 
 npm 包秒装（无 postinstall 阻塞），二进制在首次运行 `api-switch` 时自动安装。
 
+```bash
+# 更新到最新版
+npm update -g api-switch-cc
+# 或
+npm uninstall -g api-switch-cc && npm install -g api-switch-cc
+```
+
 **国内用户：** 若 GitHub 下载慢，npm 包会自动走 gitee.com 镜像或 go install 源码编译。
 
 ### 一键安装脚本
