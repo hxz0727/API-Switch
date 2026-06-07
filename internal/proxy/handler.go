@@ -229,7 +229,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	ev.Duration = time.Since(ev.Timestamp)
 	s.tracker.Record(ev)
 	if s.usageTracker != nil {
-		s.usageTracker.Record(ev.InputTokens, ev.OutputTokens, ev.Status == "error")
+		s.usageTracker.RecordWithCache(ev.InputTokens, ev.OutputTokens, ev.CacheReadTokens, ev.Status == "error")
 		_ = s.usageTracker.Save()
 	}
 }
@@ -267,6 +267,7 @@ func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anth
 
 	ev.InputTokens = antResp.Usage.InputTokens
 	ev.OutputTokens = antResp.Usage.OutputTokens
+	ev.CacheReadTokens = antResp.Usage.CacheReadInputTokens
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(antResp); err != nil {

@@ -11,20 +11,24 @@ import (
 
 // DailyUsage records token usage for a single day.
 type DailyUsage struct {
-	Date        string `json:"date"`
-	InputTokens int64  `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	Requests    int64  `json:"requests"`
-	Errors      int64  `json:"errors"`
+	Date          string `json:"date"`
+	InputTokens   int64  `json:"input_tokens"`
+	OutputTokens  int64  `json:"output_tokens"`
+	CacheHit      int64  `json:"cache_hit"`
+	CacheReadTokens int64 `json:"cache_read_tokens,omitempty"`
+	Requests      int64  `json:"requests"`
+	Errors        int64  `json:"errors"`
 }
 
 // Summary holds aggregated statistics.
 type Summary struct {
-	TotalInputTokens  int64            `json:"total_input_tokens"`
-	TotalOutputTokens int64            `json:"total_output_tokens"`
-	TotalRequests     int64            `json:"total_requests"`
-	TotalErrors       int64            `json:"total_errors"`
-	Daily             map[string]*DailyUsage `json:"daily"`
+	TotalInputTokens   int64                  `json:"total_input_tokens"`
+	TotalOutputTokens  int64                  `json:"total_output_tokens"`
+	TotalCacheHits     int64                  `json:"total_cache_hits"`
+	TotalCacheReadTokens int64                `json:"total_cache_read_tokens,omitempty"`
+	TotalRequests      int64                  `json:"total_requests"`
+	TotalErrors        int64                  `json:"total_errors"`
+	Daily              map[string]*DailyUsage `json:"daily"`
 }
 
 // Tracker tracks token usage with file-based persistence.
@@ -63,6 +67,12 @@ func NewTracker(path string) (*Tracker, error) {
 
 // Record adds a request's token usage.
 func (t *Tracker) Record(inputTokens, outputTokens int, isError bool) {
+	t.RecordWithCache(inputTokens, outputTokens, 0, isError)
+}
+
+// RecordWithCache adds a request's token usage including cache hit info.
+// cacheReadTokens > 0 means some input was served from cache (prompt caching hit).
+func (t *Tracker) RecordWithCache(inputTokens, outputTokens, cacheReadTokens int, isError bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -76,6 +86,10 @@ func (t *Tracker) Record(inputTokens, outputTokens int, isError bool) {
 	daily.Requests++
 	daily.InputTokens += int64(inputTokens)
 	daily.OutputTokens += int64(outputTokens)
+	if cacheReadTokens > 0 {
+		daily.CacheHit++
+		daily.CacheReadTokens += int64(cacheReadTokens)
+	}
 	if isError {
 		daily.Errors++
 	}
@@ -83,6 +97,10 @@ func (t *Tracker) Record(inputTokens, outputTokens int, isError bool) {
 	t.data.TotalRequests++
 	t.data.TotalInputTokens += int64(inputTokens)
 	t.data.TotalOutputTokens += int64(outputTokens)
+	if cacheReadTokens > 0 {
+		t.data.TotalCacheHits++
+		t.data.TotalCacheReadTokens += int64(cacheReadTokens)
+	}
 	if isError {
 		t.data.TotalErrors++
 	}

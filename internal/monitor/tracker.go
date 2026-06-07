@@ -18,6 +18,7 @@ type RequestEvent struct {
 	Status       string        `json:"status"` // "ok", "error", "cancelled"
 	InputTokens  int           `json:"input_tokens,omitempty"`
 	OutputTokens int           `json:"output_tokens,omitempty"`
+	CacheReadTokens int        `json:"cache_read_tokens,omitempty"` // tokens served from prompt cache
 	Error        string        `json:"error,omitempty"`
 }
 

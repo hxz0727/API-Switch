@@ -1153,8 +1153,8 @@ func runUsage(cmd *cobra.Command, args []string) error {
 
 	// Show daily breakdown (sorted by date descending)
 	if len(snap.Daily) > 0 {
-		fmt.Printf("  %-12s %8s %8s %10s\n", "日期", "请求数", "Token数", "出错")
-		fmt.Println("  " + strings.Repeat("-", 48))
+		fmt.Printf("  %-12s %8s %10s %6s %8s\n", "日期", "请求数", "Token数", "缓存命中", "出错")
+		fmt.Println("  " + strings.Repeat("-", 60))
 		var dates []string
 		for d := range snap.Daily {
 			dates = append(dates, d)
@@ -1163,25 +1163,35 @@ func runUsage(cmd *cobra.Command, args []string) error {
 		for _, d := range dates {
 			daily := snap.Daily[d]
 			total := daily.InputTokens + daily.OutputTokens
+			cacheHit := "-"
+			if daily.CacheHit > 0 {
+				cacheHit = fmt.Sprintf("%d 次/%dK", daily.CacheHit, daily.CacheReadTokens/1000)
+			}
 			errs := ""
 			if daily.Errors > 0 {
 				errs = fmt.Sprintf("%d", daily.Errors)
 			} else {
 				errs = "-"
 			}
-			fmt.Printf("  %-12s %8d %8d %10s\n", d, daily.Requests, total, errs)
+			fmt.Printf("  %-12s %8d %10d %6s %8s\n", d, daily.Requests, total, cacheHit, errs)
 		}
 		fmt.Println()
 	}
 
 	// Lifetime totals
 	fmt.Printf("  总用量：\n")
-	fmt.Printf("    请求数:    %d\n", snap.TotalRequests)
-	fmt.Printf("    Token数:   %d (输入 %d + 输出 %d)\n",
+	fmt.Printf("    请求数:        %d\n", snap.TotalRequests)
+	fmt.Printf("    Token数:       %d (输入 %d + 输出 %d)\n",
 		snap.TotalInputTokens+snap.TotalOutputTokens,
 		snap.TotalInputTokens, snap.TotalOutputTokens)
+	if snap.TotalCacheHits > 0 {
+		fmt.Printf("    缓存命中:      %d 次 (%dK tokens)\n",
+			snap.TotalCacheHits, snap.TotalCacheReadTokens/1000)
+		rate := float64(snap.TotalCacheHits) / float64(snap.TotalRequests) * 100
+		fmt.Printf("    缓存命中率:    %.1f%%\n", rate)
+	}
 	if snap.TotalErrors > 0 {
-		fmt.Printf("    出错:      %d\n", snap.TotalErrors)
+		fmt.Printf("    出错:          %d\n", snap.TotalErrors)
 	}
 
 	fmt.Println()
