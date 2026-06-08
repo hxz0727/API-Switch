@@ -209,9 +209,12 @@ func (c *OpenAIClient) ListModels() ([]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		var errBody map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&errBody)
-		return nil, fmt.Errorf("list models API error (status %d): %v", resp.StatusCode, errBody)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		bodyStr := string(raw)
+		if bodyStr == "" {
+			bodyStr = "(empty body)"
+		}
+		return nil, fmt.Errorf("list models API error (status %d): %s", resp.StatusCode, bodyStr)
 	}
 
 	var result struct {

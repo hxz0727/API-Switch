@@ -324,5 +324,11 @@ func KnownProviders() map[string]ProviderTemplate {
 			DefaultMaxTokens: 4096,
 			Models: []string{"hunyuan-lite", "hunyuan-standard"},
 		},
+		"apifree": {
+			Type:    "openai",
+			BaseURL: "https://api.apifree.ai/agent/v1",
+			DefaultMaxTokens: 4096,
+			Models: []string{"deepseek-chat", "deepseek-r1", "gpt-4o-mini", "gemini-2.0-flash", "claude-3.5-haiku", "skywork-ai/skyclaw-v1"},
+		},
 	}
 }
