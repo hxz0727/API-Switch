@@ -122,9 +122,12 @@ func (c *OpenAIClient) StreamMessage(req *openai.ChatCompletionRequest) (io.Read
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		var errBody map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&errBody)
-		return nil, fmt.Errorf("openai API error (status %d): %v", resp.StatusCode, errBody)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		bodyStr := string(raw)
+		if bodyStr == "" {
+			bodyStr = "(empty body)"
+		}
+		return nil, fmt.Errorf("openai streaming error (status %d): %s", resp.StatusCode, bodyStr)
 	}
 
 	// Some providers (e.g. APIFree) return error JSON (not SSE) with HTTP 200.
