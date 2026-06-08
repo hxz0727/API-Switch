@@ -232,6 +232,25 @@ api-switch serve -v                     # 带请求详情
 # 配置热加载：修改 ~/.api-switch.yaml 后自动生效
 ```
 
+### 后台运行（Daemon）
+
+```bash
+# 启动后台服务
+api-switch start
+
+# 查看状态
+api-switch status
+
+# 查看日志
+api-switch logs
+
+# 重启
+api-switch restart
+
+# 停止
+api-switch stop
+```
+
 ### 用量统计
 
 ```bash

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/hxz0727/API-Switch/internal/config"
+	"github.com/hxz0727/API-Switch/internal/daemon"
 	"github.com/hxz0727/API-Switch/internal/logutil"
 	"github.com/hxz0727/API-Switch/internal/provider"
 	"github.com/hxz0727/API-Switch/internal/proxy"
@@ -306,7 +307,42 @@ Examples:
 		},
 	}
 
-	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd, usageCmd, versionCmd)
+	// daemon management commands
+	startCmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start the proxy server in background (daemon)",
+		RunE:  runStart,
+	}
+	startCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
+	startCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
+
+	stopCmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the background proxy server",
+		RunE:  runStop,
+	}
+
+	statusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Check if the proxy server is running",
+		RunE:  runStatus,
+	}
+
+	restartCmd := &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the background proxy server",
+		RunE:  runRestart,
+	}
+	restartCmd.Flags().IntVarP(&port, "port", "p", 8080, "proxy server port")
+	restartCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
+
+	logsCmd := &cobra.Command{
+		Use:   "logs",
+		Short: "View daemon log output",
+		RunE:  runLogs,
+	}
+
+	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, startCmd, stopCmd, statusCmd, restartCmd, logsCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd, usageCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -1120,6 +1156,62 @@ func runMonitor(cmd *cobra.Command, args []string) error {
 	if err := proxy.MonitorConnect(addr); err != nil {
 		return fmt.Errorf("monitor error: %w", err)
 	}
+	return nil
+}
+
+func getBinaryPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "api-switch"
+	}
+	return exe
+}
+
+func runStart(cmd *cobra.Command, args []string) error {
+	pid, err := daemon.Start(getBinaryPath(), port, cfgPath)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("api-switch started (PID %d) on port %d\n", pid, port)
+	fmt.Printf("Log: %s\n", daemon.LogPath())
+	fmt.Printf("Status: api-switch status\nStop:   api-switch stop\n")
+	return nil
+}
+
+func runStop(cmd *cobra.Command, args []string) error {
+	if err := daemon.Stop(); err != nil {
+		return err
+	}
+	fmt.Println("api-switch stopped")
+	return nil
+}
+
+func runStatus(cmd *cobra.Command, args []string) error {
+	if daemon.Running() {
+		fmt.Printf("api-switch is running (PID %d)\n", daemon.PID())
+		fmt.Printf("Log: %s\n", daemon.LogPath())
+	} else {
+		fmt.Println("api-switch is not running")
+	}
+	return nil
+}
+
+func runRestart(cmd *cobra.Command, args []string) error {
+	if daemon.Running() {
+		fmt.Println("Stopping...")
+		daemon.Stop()
+	}
+	fmt.Println("Starting...")
+	return runStart(cmd, args)
+}
+
+func runLogs(cmd *cobra.Command, args []string) error {
+	f, err := os.Open(daemon.LogPath())
+	if err != nil {
+		return fmt.Errorf("no log file found: %w", err)
+	}
+	defer f.Close()
+	io.Copy(os.Stdout, f)
 	return nil
 }
 
