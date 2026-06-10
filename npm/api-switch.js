@@ -26,6 +26,7 @@ const BIN_NAME = IS_WIN ? "api-switch.exe" : "api-switch";
 const BIN_PATH = join(BIN_DIR, BIN_NAME);
 
 const GITEE_REPO = "https://gitee.com/776311606/API-Switch.git";
+const GITEE_RAW  = `https://gitee.com/776311606/API-Switch/raw/release`;
 const GH_RELEASE = `https://github.com/hxz0727/API-Switch/releases/download/${VERSION}`;
 
 function platform() {
@@ -68,6 +69,7 @@ function ensureInstalled() {
 
   // ── Step 2: Gitee clone + build (China mirror, needs Go + Git) ──
   console.log("GitHub not reachable, trying Gitee mirror...");
+  if (tryGiteeRaw(plat)) return;
   if (tryGiteeBuild(plat)) return;
 
   // ── Step 3: go install (needs Go only) ──
@@ -95,6 +97,18 @@ function tryGitHubRaw(plat) {
   } catch (_) {
     console.log("  GitHub not reachable");
   }
+  return false;
+}
+
+function tryGiteeRaw(plat) {
+  try {
+    const url = `${GITEE_RAW}/api-switch-${plat}`;
+    execSync(`curl -sSL --connect-timeout 10 --max-time 120 "${url}" -o "${BIN_PATH}"`, { stdio: "pipe", timeout: 150000 });
+    chmodSync(BIN_PATH, 0o755);
+    console.log("  Done (Gitee)");
+    return true;
+  } catch (_) {}
+  console.log("  Gitee download failed");
   return false;
 }
 
