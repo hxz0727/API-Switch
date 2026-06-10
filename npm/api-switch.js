@@ -83,9 +83,17 @@ function ensureInstalled() {
       if (IS_WIN) {
         execSync(`move /Y "${tmp}" "${BIN_PATH}"`, { stdio: "pipe", shell: true });
       } else {
-        execSync(`tar xzf "${tmp}" -C "${BIN_DIR}" "${archive}"`, { stdio: "pipe" });
-        execSync(`mv "${join(BIN_DIR, archive)}" "${BIN_PATH}"`, { stdio: "pipe" });
-        unlinkSync(tmp);
+        // Try tar first, fallback to raw binary (no archive)
+        try {
+          execSync(`tar xzf "${tmp}" -C "${BIN_DIR}" "${archive}"`, { stdio: "pipe" });
+          execSync(`mv "${join(BIN_DIR, archive)}" "${BIN_PATH}"`, { stdio: "pipe" });
+          unlinkSync(tmp);
+        } catch (_) {
+          // Tar failed — maybe old system. Use the raw binary directly
+          try { unlinkSync(tmp); } catch (_) {}
+          const rawUrl = `${GH_RELEASE}/api-switch-${plat}`;
+          execSync(`curl -sSL --connect-timeout 10 --max-time 120 "${rawUrl}" -o "${BIN_PATH}"`, { stdio: "pipe", timeout: 150000 });
+        }
       }
       chmodSync(BIN_PATH, 0o755);
       console.log("Installed via GitHub.");
