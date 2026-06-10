@@ -53,7 +53,16 @@ function showManualSteps() {
 }
 
 function ensureInstalled() {
-  if (existsSync(BIN_PATH)) return;
+  // Reinstall if binary is outdated (version mismatch)
+  if (existsSync(BIN_PATH)) {
+    try {
+      const current = execSync(`"${BIN_PATH}" version`, { encoding: "utf8", stdio: "pipe", timeout: 5000 }).trim();
+      if (current.includes(VERSION)) return;
+      console.log(`Updating binary from ${current} to ${VERSION}...`);
+    } catch (_) {
+      // binary broken or old format, reinstall
+    }
+  }
 
   mkdirSync(BIN_DIR, { recursive: true });
   console.log("First run — installing api-switch...");
