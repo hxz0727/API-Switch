@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 
@@ -342,7 +343,21 @@ Examples:
 		RunE:  runLogs,
 	}
 
-	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, startCmd, stopCmd, statusCmd, restartCmd, logsCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd, usageCmd, versionCmd)
+	updateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update API-Switch to the latest version",
+		Long: `Update the API-Switch binary to the latest version.
+
+Checks for newer npm or go-installed versions and upgrades automatically.
+
+Examples:
+  api-switch update              Update to latest version
+  api-switch update --check      Only check for updates (no install)`,
+		RunE: runUpdate,
+	}
+	updateCmd.Flags().Bool("check", false, "Only check for updates, don't install")
+
+	rootCmd.AddCommand(useCmd, setupCmd, serveCmd, startCmd, stopCmd, statusCmd, restartCmd, logsCmd, updateCmd, modelCmd, providerCmd, configCmd, testCmd, doctorCmd, monitorCmd, usageCmd, versionCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -1203,6 +1218,79 @@ func runRestart(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("Starting...")
 	return runStart(cmd, args)
+}
+
+func runUpdate(cmd *cobra.Command, args []string) error {
+	checkOnly, _ := cmd.Flags().GetBool("check")
+
+	// Check if installed via npm
+	npmGlobal, npmErr := execCommand("npm", "list", "-g", "api-switch-cc", "--depth=0")
+	if npmErr == nil && strings.Contains(string(npmGlobal), "api-switch-cc") {
+		latest, err := execCommand("npm", "view", "api-switch-cc", "version")
+		if err != nil {
+			return fmt.Errorf("failed to check latest npm version: %w", err)
+		}
+		latestVer := strings.TrimSpace(string(latest))
+
+		// Get current installed version
+		current, _ := execCommand("npm", "list", "-g", "api-switch-cc", "--depth=0", "--json")
+		currentVer := "unknown"
+		if current != nil {
+			// Parse from JSON: {"dependencies":{"api-switch-cc":{"version":"0.4.0"}}}
+			for _, line := range strings.Split(string(current), "\n") {
+				if strings.Contains(line, `"version"`) {
+					currentVer = strings.Trim(strings.Split(line, `"`)[3], `"`)
+					break
+				}
+			}
+		}
+
+		if currentVer == latestVer {
+			fmt.Printf("Already up to date (npm %s)\n", currentVer)
+		} else {
+			fmt.Printf("Current: %s  →  Latest: %s\n", currentVer, latestVer)
+		}
+
+		if checkOnly {
+			return nil
+		}
+
+		if currentVer == latestVer {
+			return nil
+		}
+
+		fmt.Println("\nUpdating via npm...")
+		output, err := execCommand("npm", "update", "-g", "api-switch-cc")
+		if err != nil {
+			return fmt.Errorf("npm update failed: %s", string(output))
+		}
+		fmt.Println("Updated successfully. Run 'api-switch version' to verify.")
+		fmt.Println("(Delete ~/.bin cache if binary still shows old version)")
+		return nil
+	}
+
+	// Check if installed via go install
+	_, goErr := execCommand("which", "go")
+	if goErr == nil {
+		if checkOnly {
+			fmt.Printf("Go install: github.com/hxz0727/API-Switch/cmd/api-switch@latest\n")
+			return nil
+		}
+		fmt.Println("Updating via go install...")
+		output, err := execCommand("bash", "-c", "GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go install github.com/hxz0727/API-Switch/cmd/api-switch@latest")
+		if err != nil {
+			return fmt.Errorf("go install failed: %s", string(output))
+		}
+		fmt.Println("Updated successfully. Run 'api-switch version' to verify.")
+		return nil
+	}
+
+	return fmt.Errorf("API-Switch is not installed via npm or go. To update, reinstall:\n  npm install -g api-switch-cc\n  or\n  go install github.com/hxz0727/API-Switch/cmd/api-switch@latest")
+}
+
+func execCommand(name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	return cmd.Output()
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
