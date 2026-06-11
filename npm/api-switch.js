@@ -19,7 +19,7 @@ const { existsSync, mkdirSync, chmodSync, unlinkSync, copyFileSync } = require("
 const { join } = require("path");
 const { execSync, spawnSync } = require("child_process");
 
-const VERSION = "v0.4.0";
+const VERSION = "v0.4.5";
 const BIN_DIR = join(__dirname, ".bin");
 const IS_WIN = process.platform === "win32";
 const BIN_NAME = IS_WIN ? "api-switch.exe" : "api-switch";
