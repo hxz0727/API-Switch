@@ -3,8 +3,8 @@
 #
 # Usage:
 #   ./bump.sh                  Show current versions
-#   ./bump.sh <new-version>    Bump everything to the given version
-#   ./bump.sh --npm-only       Only update npm files (no git tag/build)
+#   ./bump.sh <new-version>    Full release: bump + commit + tag + push + npm publish + Gitee sync
+#   ./bump.sh --npm-only       Only update npm files (no git/build/publish)
 #   ./bump.sh --no-publish     Skip npm publish
 #
 # The version format is vX.Y.Z (with leading 'v').
@@ -61,17 +61,17 @@ echo ""
 echo "  Bumping to $VER (npm $NPM_VER)..."
 echo ""
 
-# 1. Update npm wrapper version
+# ── 1. Update npm wrapper version ──
 sed -i "s/const VERSION = \"[^\"]*\"/const VERSION = \"$VER\"/" npm/api-switch.js
 sed -i "s/const DOWNLOAD_VERSION = \"[^\"]*\"/const DOWNLOAD_VERSION = \"$VER\"/" npm/install.js
 green "  npm/api-switch.js → $VER"
 green "  npm/install.js     → $VER"
 
-# 2. Update npm package.json version
+# ── 2. Update npm package.json version ──
 sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NPM_VER\"/" npm/package.json
 green "  npm/package.json   → $NPM_VER"
 
-# 3. Verify
+# ── 3. Verify ──
 ACTUAL=$(current_version)
 ACTUAL_NPM=$(npm_version)
 if [ "$ACTUAL" != "$VER" ]; then
@@ -90,7 +90,7 @@ if $NPM_ONLY; then
   exit 0
 fi
 
-# 4. Build binary
+# ── 4. Build binary ──
 echo "  Building binary..."
 if go build -ldflags="-s -w -X main.Version=$VER" -o /tmp/api-switch-release ./cmd/api-switch/ 2>&1; then
   VERIFIED=$("/tmp/api-switch-release" version 2>/dev/null || echo "FAIL")
@@ -100,7 +100,7 @@ else
 fi
 echo ""
 
-# 5. Commit + tag + push
+# ── 5. Commit + tag + push to GitHub ──
 git add npm/api-switch.js npm/install.js npm/package.json
 git commit -m "release: $VER" 2>&1
 git tag -d "$VER" 2>/dev/null || true
@@ -109,7 +109,37 @@ git push origin master --tags
 green "  Pushed to GitHub ($VER)"
 echo ""
 
-# 6. npm publish (token from env or ~/.npmrc)
+# ── 6. Push to Gitee mirror ──
+echo "  Syncing Gitee mirror..."
+if git remote get-url gitee >/dev/null 2>&1; then
+  git push gitee master --tags 2>&1 || yellow "  Gitee push failed"
+else
+  yellow "  No Gitee remote configured. Add it with:"
+  yellow "    git remote add gitee https://gitee.com/776311606/API-Switch.git"
+fi
+
+# ── 7. Update Gitee release branch (binary) ──
+echo "  Updating Gitee release branch..."
+if [ -f /tmp/api-switch-release ]; then
+  cp /tmp/api-switch-release /tmp/api-switch-linux-amd64
+  if git clone --depth=1 https://gitee.com/776311606/API-Switch.git /tmp/gitee-release 2>/dev/null; then
+    cd /tmp/gitee-release
+    git checkout release 2>/dev/null || git checkout -b release
+    rm -rf * .github .gitignore 2>/dev/null || true
+    cp /tmp/api-switch-linux-amd64 api-switch-linux-amd64
+    git add -f api-switch-linux-amd64
+    git commit -m "release: $VER linux-amd64 binary" 2>&1 || true
+    git push origin release --force 2>&1 || true
+    cd "$ROOT"
+    rm -rf /tmp/gitee-release
+    green "  Gitee release branch updated"
+  else
+    yellow "  Could not clone Gitee repo to update release branch"
+  fi
+fi
+echo ""
+
+# ── 8. npm publish (token from env or ~/.npmrc) ──
 if $NO_PUBLISH; then
   yellow "  Skipping npm publish (--no-publish)"
 else
@@ -131,8 +161,10 @@ else
   cd "$ROOT"
   green "  Published to npm"
 fi
+
 echo ""
-green "  Done! $VER"
+green "  Done! Released $VER"
 echo ""
-echo "  Manual steps:"
-echo "    ./bump.sh --sync-gitee    (push tags to Gitee + update release branch)"
+echo "  Verify:"
+echo "    npm install -g api-switch-cc@$NPM_VER"
+echo "    api-switch version"
