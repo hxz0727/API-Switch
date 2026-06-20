@@ -4,17 +4,17 @@ import "encoding/json"
 
 // MessagesRequest represents an Anthropic Messages API request.
 type MessagesRequest struct {
-	Model         string              `json:"model"`
-	Messages      []Message           `json:"messages"`
-	System        json.RawMessage     `json:"system,omitempty"`
-	MaxTokens     int                 `json:"max_tokens"`
-	Temperature   *float64            `json:"temperature,omitempty"`
-	TopP          *float64            `json:"top_p,omitempty"`
-	TopK          *int                `json:"top_k,omitempty"`
-	StopSequences []string            `json:"stop_sequences,omitempty"`
-	Stream        bool                `json:"stream,omitempty"`
-	Tools         []ToolDefinition    `json:"tools,omitempty"`
-	ToolChoice    json.RawMessage     `json:"tool_choice,omitempty"`
+	Model         string           `json:"model"`
+	Messages      []Message        `json:"messages"`
+	System        json.RawMessage  `json:"system,omitempty"`
+	MaxTokens     int              `json:"max_tokens"`
+	Temperature   *float64         `json:"temperature,omitempty"`
+	TopP          *float64         `json:"top_p,omitempty"`
+	TopK          *int             `json:"top_k,omitempty"`
+	StopSequences []string         `json:"stop_sequences,omitempty"`
+	Stream        bool             `json:"stream,omitempty"`
+	Tools         []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice    json.RawMessage  `json:"tool_choice,omitempty"`
 }
 
 // ToolDefinition describes a tool available to the model.
@@ -81,7 +81,7 @@ type StreamEvent struct {
 
 // MessageStartEvent represents a message_start streaming event.
 type MessageStartEvent struct {
-	Type    string          `json:"type"`
+	Type    string           `json:"type"`
 	Message MessagesResponse `json:"message"`
 }
 

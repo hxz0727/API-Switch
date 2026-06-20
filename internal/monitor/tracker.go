@@ -8,18 +8,18 @@ import (
 
 // RequestEvent represents a single proxied request.
 type RequestEvent struct {
-	ID           string        `json:"id"`
-	Timestamp    time.Time     `json:"timestamp"`
-	Model        string        `json:"model"`
-	Provider     string        `json:"provider"`
-	ProviderType string        `json:"provider_type"`
-	Stream       bool          `json:"stream"`
-	Duration     time.Duration `json:"duration"`
-	Status       string        `json:"status"` // "ok", "error", "cancelled"
-	InputTokens  int           `json:"input_tokens,omitempty"`
-	OutputTokens int           `json:"output_tokens,omitempty"`
-	CacheReadTokens int        `json:"cache_read_tokens,omitempty"` // tokens served from prompt cache
-	Error        string        `json:"error,omitempty"`
+	ID              string        `json:"id"`
+	Timestamp       time.Time     `json:"timestamp"`
+	Model           string        `json:"model"`
+	Provider        string        `json:"provider"`
+	ProviderType    string        `json:"provider_type"`
+	Stream          bool          `json:"stream"`
+	Duration        time.Duration `json:"duration"`
+	Status          string        `json:"status"` // "ok", "error", "cancelled"
+	InputTokens     int           `json:"input_tokens,omitempty"`
+	OutputTokens    int           `json:"output_tokens,omitempty"`
+	CacheReadTokens int           `json:"cache_read_tokens,omitempty"` // tokens served from prompt cache
+	Error           string        `json:"error,omitempty"`
 }
 
 // Tracker is a thread-safe ring buffer of request events with SSE subscriber support.

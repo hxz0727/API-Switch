@@ -80,7 +80,7 @@ func TestParseLevel(t *testing.T) {
 		{"INFO", LevelInfo, false},
 		{"debug", LevelDebug, false},
 		{"DEBUG", LevelDebug, false},
-		{"unknown", LevelInfo, true},  // returns LevelInfo on error
+		{"unknown", LevelInfo, true}, // returns LevelInfo on error
 		{"trace", LevelInfo, true},
 		{"", LevelInfo, true},
 	}

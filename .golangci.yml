@@ -19,6 +19,9 @@ linters-settings:
     checks: ["all"]
   errcheck:
     check-type-assertions: false
+    exclude-functions:
+      - (*net/http.Response).Body.Close
+      - (*os.File).Close
 
 issues:
   exclude-use-default: false

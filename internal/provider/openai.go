@@ -145,7 +145,7 @@ func (c *OpenAIClient) StreamMessage(req *openai.ChatCompletionRequest) (io.Read
 	reader := bufio.NewReaderSize(resp.Body, 1024)
 	peek, err := reader.Peek(1)
 	if err != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("failed to peek streaming response: %w", err)
 	}
 	if peek[0] == '{' {
@@ -198,7 +198,7 @@ func (c *OpenAIClient) Ping() error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return nil
 }
 
