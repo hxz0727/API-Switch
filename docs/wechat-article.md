@@ -143,7 +143,7 @@ API-Switch 是纯命令行的，只做一件事：在终端里快速切换 Claud
 - GitHub：https://github.com/hxz0727/API-Switch
 - Gitee 镜像：https://gitee.com/776311606/API-Switch
 - npm 包：`api-switch-cc`
-- 版本：v0.4.0
+- 版本：v0.4.7
 - 语言：Go，单二进制 ~10MB，启动内存 < 20MB
 - 许可：MIT
 
@@ -152,7 +152,7 @@ API-Switch 是纯命令行的，只做一件事：在终端里快速切换 Claud
 npm install -g api-switch-cc
 
 # Go 安装（国内走 goproxy.cn）
-GOPROXY=https://goproxy.cn,direct go install github.com/hxz0727/API-Switch/cmd/api-switch@v0.4.0
+GOPROXY=https://goproxy.cn,direct go install github.com/hxz0727/API-Switch/cmd/api-switch@v0.4.7
 
 # 一键脚本（优先 Gitee 镜像）
 curl -sSL https://gitee.com/776311606/API-Switch/raw/master/install.sh | bash

@@ -10,15 +10,18 @@
 claude → api-switch → ├─ claude-*  → Anthropic API (透传)
                        ├─ gpt-4o    → 转 OpenAI 协议 → OpenAI API → 转回 Anthropic 格式
                        ├─ deepseek  → 转 OpenAI 协议 → DeepSeek API → 转回 Anthropic 格式
+                       ├─ agnes     → 转 OpenAI 协议 → Agnes AI → 转回 Anthropic 格式
                        └─ qwen      → 转 OpenAI 协议 → DashScope API → 转回 Anthropic 格式
 ```
 
 ## ✨ 特性
 
 - **零配置切换模型** — `api-switch use <model>` 即刻切换，Claude Code 热加载
-- **多提供商支持** — Anthropic、OpenAI、DeepSeek、Qwen、Moonshot 等任意 OpenAI 兼容 API
+- **多提供商支持** — Anthropic、OpenAI、DeepSeek、Qwen、Moonshot、Agnes AI 等任意 OpenAI 兼容 API
 - **协议自动转换** — Anthropic ↔ OpenAI 双向转换，含流式 SSE、工具调用、图片
-- **Provider 模板** — 内置 10+ 厂商预设，一条命令添加
+- **Provider 模板** — 内置 11 个厂商预设（含 Agnes AI 免费大模型），一条命令添加
+- **自动更新** — 启动时自动检测新版本，静默下载并重启升级
+- **优雅关闭** — SIGINT/SIGTERM 信号处理，安全关闭代理服务
 - **实时监控** — Web 仪表盘 + 终端实时日志
 - **热加载配置** — 修改配置文件自动生效，无需重启
 - **一键诊断** — `api-switch doctor` 快速定位配置问题
@@ -28,7 +31,7 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **用量统计** — `api-switch usage` 按天统计 Token 用量、缓存命中率
 - **国内镜像** — Gitee 同步 + goproxy.cn 加速安装
 
-> **v0.4.0** — 新增用量统计、缓存命中率追踪、Gitee 镜像
+> **v0.4.7** — 新增 Agnes AI 支持、自动更新、优雅关闭、全面单元测试覆盖
 
 ## ⚡ 快速开始
 
@@ -41,10 +44,10 @@ npm install -g api-switch-cc
 # DeepSeek — 自动填充 base_url、type、建议模型
 api-switch setup deepseek --key sk-xxx
 
-# Agnes AI — 免费大模型，注册即用
+# Agnes AI — 免费大模型，注册即用 https://platform.agnes-ai.com/
 api-switch setup agnes --key sk-xxx
 
-# 启动
+# 启动（自动检测更新）
 api-switch serve
 ```
 
@@ -80,9 +83,9 @@ npm 包秒装（无 postinstall 阻塞），二进制在首次运行 `api-switch
 
 ```bash
 # 更新到最新版
-npm update -g api-switch-cc
+api-switch update
 # 或
-npm uninstall -g api-switch-cc && npm install -g api-switch-cc
+npm update -g api-switch-cc
 ```
 
 **国内用户：** 若 GitHub 下载慢，npm 包会自动走 gitee.com 镜像或 go install 源码编译。
@@ -152,6 +155,8 @@ api-switch provider add qwen
 # step      → https://api.stepfun.com/v1
 # ernie     → https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat
 # hunyuan   → https://api.hunyuan.cloud.tencent.com/v1
+# agnes     → https://apihub.agnes-ai.com/v1        （免费，注册即用）
+# apifree   → https://api.apifree.ai/agent/v1
 
 # 自定义提供商
 api-switch provider add my-provider \
@@ -193,6 +198,7 @@ api-switch use
 api-switch use gpt-4o
 api-switch use deepseek-chat
 api-switch use qwen-plus
+api-switch use agnes-2.0-flash
 ```
 
 ### setup 一键配置
@@ -231,6 +237,7 @@ api-switch serve
 api-switch serve -p 9090 -vv          # debug 级别日志
 api-switch serve -q                     # 仅显示错误
 api-switch serve -v                     # 带请求详情
+api-switch serve --no-auto-update       # 跳过自动更新检查
 
 # 配置热加载：修改 ~/.api-switch.yaml 后自动生效
 ```
@@ -264,6 +271,20 @@ api-switch usage
 api-switch usage --reset
 ```
 
+### 更新
+
+```bash
+# 检查更新
+api-switch update --check
+
+# 自动更新到最新版
+api-switch update
+
+# 启动时自动检测（默认开启）
+api-switch serve                    # 自动检查 + 静默升级
+api-switch serve --no-auto-update   # 跳过自动检查
+```
+
 ### 监控与诊断
 
 ```bash
@@ -272,12 +293,6 @@ api-switch monitor --web
 
 # 终端实时监控
 api-switch monitor
-
-# 用量统计（按天/总 Token 数）
-api-switch usage
-
-# 重置用量统计
-api-switch usage --reset
 
 # 一键诊断
 api-switch doctor
@@ -302,17 +317,19 @@ api-switch config init                # 创建默认配置
 
 ## 🔧 场景示例
 
-### 混用 Anthropic + DeepSeek
+### 混用 Anthropic + DeepSeek + Agnes AI
 
 ```bash
 # 配置
 api-switch provider add anthropic --key sk-ant-xxx --url https://api.anthropic.com --type anthropic
 api-switch provider add deepseek --key sk-xxx
+api-switch setup agnes --key sk-xxx     # Agnes AI 免费大模型
 
 # 使用
 api-switch use deepseek-chat   # 切换到 DeepSeek
 api-switch serve
 # Claude Code 会话中随时切换：
+api-switch use agnes-2.0-flash  # 切到 Agnes AI（免费）
 api-switch use claude-sonnet-4-20250514  # 切回 Claude
 ```
 
@@ -323,6 +340,16 @@ api-switch setup qwen --key sk-xxx
 api-switch setup deepseek --key sk-xxx
 api-switch use qwen-plus
 api-switch serve
+```
+
+### 免费模型方案（Agnes AI）
+
+```bash
+# 注册获取 API Key: https://platform.agnes-ai.com/
+api-switch setup agnes --key sk-xxx
+api-switch use agnes-2.0-flash
+api-switch serve
+# 零成本使用大模型
 ```
 
 ### 实时切换工作流
@@ -345,7 +372,7 @@ api-switch use deepseek-chat    # 切换到 DeepSeek
                     │
 claude ──→ /v1/messages ──┤
        POST               │                          ┌─ 请求转换 ──┐
-                           └─ OpenAI Client ──→  ──→ │  OpenAI 协议  │ ──→ OpenAI/DeepSeek 等
+                           └─ OpenAI Client ──→  ──→ │  OpenAI 协议  │ ──→ OpenAI/DeepSeek/Agnes 等
                                                      └─ 响应转换 ──┘
 
 管理端点:
@@ -364,6 +391,8 @@ claude ──→ /v1/messages ──┤
 |---|---|
 | `~/.api-switch.yaml` | API-Switch 配置（提供商、模型路由） |
 | `~/.claude/settings.json` | Claude Code 配置（由 `api-switch use` 管理） |
+| `~/.api-switch/usage.json` | 用量统计数据 |
+| `~/.api-switch/update-state.json` | 自动更新状态（上次检查时间） |
 
 ### 两种提供商类型
 
@@ -420,6 +449,16 @@ api-switch monitor
 
 不需要。Claude Code 热加载 `~/.claude/settings.json`，`api-switch use` 切换后立即生效。
 
+### 如何更新到最新版？
+
+```bash
+# 自动更新（推荐）
+api-switch update
+
+# 或手动
+npm update -g api-switch-cc
+```
+
 ### 如何修改端口？
 
 ```bash
@@ -445,6 +484,10 @@ api-switch config set providers.openai.api_key sk-new-key
 curl -X POST http://localhost:8080/admin/reload
 ```
 
+### 自动更新如何工作？
+
+`api-switch serve` 启动时在后台检查 GitHub/Gitee Release，24 小时内最多检查一次。发现新版本后自动下载对应平台的二进制、替换当前文件、无缝重启。可用 `--no-auto-update` 禁用。
+
 ## 📁 项目结构
 
 ```
@@ -452,23 +495,43 @@ cmd/api-switch/main.go              # CLI 入口
 internal/
 ├── config/
 │   ├── config.go                   # 配置类型、加载、保存、路由
+│   ├── config_test.go              # 配置单元测试
 │   ├── claude_config.go            # Claude Code 配置管理
 │   └── doctor.go                   # 一键诊断
+├── daemon/
+│   ├── daemon.go                   # 后台进程管理
+│   ├── daemon_test.go              # daemon 单元测试
+│   ├── daemon_unix.go              # Unix 进程属性
+│   └── daemon_windows.go           # Windows 进程属性
 ├── logutil/
-│   └── logger.go                   # 分级日志
+│   ├── logger.go                   # 分级日志
+│   └── logger_test.go              # 日志单元测试
 ├── monitor/
-│   └── tracker.go                  # 请求事件追踪
+│   ├── tracker.go                  # 请求事件追踪
+│   └── tracker_test.go             # 追踪器单元测试
 ├── provider/
 │   ├── anthropic.go                # Anthropic API 客户端
-│   └── openai.go                   # OpenAI API 客户端
+│   ├── openai.go                   # OpenAI API 客户端
+│   └── openai_test.go              # 客户端单元测试
 ├── proxy/
 │   ├── handler.go                  # HTTP 代理 + 请求处理
 │   ├── admin.go                    # 管理端点（仪表盘、SSE、监控）
 │   ├── converter.go                # Anthropic ↔ OpenAI 请求转换
+│   ├── converter_test.go           # 转换器单元测试
 │   ├── response.go                 # OpenAI → Anthropic 响应转换
+│   ├── response_test.go            # 响应转换单元测试
 │   └── router.go                   # 模型路由
-└── streaming/
-    └── sse.go                      # SSE 流式转换
+├── streaming/
+│   ├── sse.go                      # SSE 流式转换
+│   └── sse_test.go                 # SSE 转换单元测试
+├── update/
+│   ├── updater.go                  # 自动更新核心逻辑
+│   ├── updater_test.go             # 更新功能单元测试
+│   ├── exec_unix.go                # Unix 进程重启
+│   └── exec_windows.go             # Windows 进程重启
+└── usage/
+    ├── tracker.go                  # Token 用量追踪
+    └── tracker_test.go             # 用量追踪单元测试
 pkg/
 ├── anthropic/types.go              # Anthropic 类型定义
 └── openai/types.go                 # OpenAI 类型定义
