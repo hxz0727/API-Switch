@@ -34,7 +34,7 @@ func Running() bool {
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
-		os.Remove(pidFile())
+		_ = os.Remove(pidFile())
 		return false
 	}
 	// On Unix, FindProcess always succeeds; check with signal 0
@@ -80,13 +80,11 @@ func Start(binary string, port int, cfgPath string) (int, error) {
 	cmd.Stdout = out
 	cmd.Stderr = out
 
-	// Detach from parent: set new process group so it survives terminal hangup
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	// Detach from parent: set new process group so it survives terminal hangup (Unix only)
+	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
-		out.Close()
+		_ = out.Close()
 		return 0, fmt.Errorf("failed to start daemon: %w", err)
 	}
 
@@ -94,22 +92,22 @@ func Start(binary string, port int, cfgPath string) (int, error) {
 	pidStr := strconv.Itoa(cmd.Process.Pid)
 	tmpFile := pidFile() + ".tmp"
 	if err := os.WriteFile(tmpFile, []byte(pidStr), 0644); err != nil {
-		cmd.Process.Kill()
-		out.Close()
+		_ = cmd.Process.Kill()
+		_ = out.Close()
 		return 0, fmt.Errorf("failed to write PID temp file: %w", err)
 	}
 	if err := os.Rename(tmpFile, pidFile()); err != nil {
-		cmd.Process.Kill()
-		out.Close()
-		os.Remove(tmpFile)
+		_ = cmd.Process.Kill()
+		_ = out.Close()
+		_ = os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to rename PID file: %w", err)
 	}
 
 	// Don't wait for the child — release the file descriptor and let it run
 	go func() {
-		cmd.Wait()
-		out.Close()
-		os.Remove(pidFile())
+		_ = cmd.Wait()
+		_ = out.Close()
+		_ = os.Remove(pidFile())
 	}()
 
 	return cmd.Process.Pid, nil
@@ -123,10 +121,10 @@ func Stop() error {
 	pid := PID()
 	p, _ := os.FindProcess(pid)
 	if err := p.Signal(syscall.SIGTERM); err != nil {
-		os.Remove(pidFile())
+		_ = os.Remove(pidFile())
 		return fmt.Errorf("failed to stop daemon: %w", err)
 	}
-	os.Remove(pidFile())
+	_ = os.Remove(pidFile())
 	return nil
 }
 
