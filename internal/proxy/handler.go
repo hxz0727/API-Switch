@@ -29,6 +29,8 @@ type Server struct {
 	tracker      *monitor.Tracker
 	usageTracker *usage.Tracker
 	mu           sync.Mutex
+	httpServer   *http.Server
+	done         chan struct{}
 }
 
 // DefaultUsagePath returns the default usage data file path.
@@ -52,6 +54,7 @@ func NewServer(cfg *config.Config) *Server {
 		router:       NewRouter(cfg),
 		tracker:      monitor.NewTracker(1000),
 		usageTracker: initUsageTracker(),
+		done:         make(chan struct{}),
 	}
 	return s
 }
@@ -82,7 +85,21 @@ func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 		go s.watchConfigFile(cfgPath)
 	}
 
-	return http.ListenAndServe(addr, mux)
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+	return s.httpServer.ListenAndServe()
+}
+
+// Shutdown gracefully stops the HTTP server and cleans up resources.
+func (s *Server) Shutdown(ctx context.Context) error {
+	// Signal the config watcher to stop
+	close(s.done)
+	if s.httpServer != nil {
+		return s.httpServer.Shutdown(ctx)
+	}
+	return nil
 }
 
 // ReloadConfig reloads the config and reinitializes the router.
@@ -137,6 +154,8 @@ func (s *Server) watchConfigFile(path string) {
 
 	for {
 		select {
+		case <-s.done:
+			return
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return
@@ -207,7 +226,6 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ev.Model = antReq.Model
 	ev.Provider = route.ProviderName
 	ev.ProviderType = route.ProviderType
 
@@ -230,7 +248,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	s.tracker.Record(ev)
 	if s.usageTracker != nil {
 		s.usageTracker.RecordWithCache(ev.InputTokens, ev.OutputTokens, ev.CacheReadTokens, ev.Status == "error")
-		_ = s.usageTracker.Save()
+		if err := s.usageTracker.Save(); err != nil {
+			logutil.Warn("Failed to save usage data: %v", err)
+		}
 	}
 }
 
@@ -251,12 +271,12 @@ func (s *Server) handleAnthropic(ctx context.Context, w http.ResponseWriter, ant
 	if antReq.Stream {
 		s.handleAnthropicStreaming(ctx, w, antReq, route, ev)
 	} else {
-		s.handleAnthropicNonStreaming(w, antReq, route, ev)
+		s.handleAnthropicNonStreaming(ctx, w, antReq, route, ev)
 	}
 }
 
-func (s *Server) handleAnthropicNonStreaming(w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult, ev *monitor.RequestEvent) {
-	antResp, err := route.Anthropic.SendMessage(antReq)
+func (s *Server) handleAnthropicNonStreaming(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult, ev *monitor.RequestEvent) {
+	antResp, err := route.Anthropic.SendMessageWithContext(ctx, antReq)
 	if err != nil {
 		logutil.Error("Anthropic API error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
@@ -318,12 +338,12 @@ func (s *Server) handleOpenAI(ctx context.Context, w http.ResponseWriter, antReq
 	if antReq.Stream {
 		s.handleOpenAIStreaming(ctx, w, oaiReq, route, antReq.Model, ev)
 	} else {
-		s.handleOpenAINonStreaming(w, oaiReq, route, antReq.Model, ev)
+		s.handleOpenAINonStreaming(ctx, w, oaiReq, route, antReq.Model, ev)
 	}
 }
 
-func (s *Server) handleOpenAINonStreaming(w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string, ev *monitor.RequestEvent) {
-	oaiResp, err := route.OpenAI.SendMessage(oaiReq)
+func (s *Server) handleOpenAINonStreaming(ctx context.Context, w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string, ev *monitor.RequestEvent) {
+	oaiResp, err := route.OpenAI.SendMessageWithContext(ctx, oaiReq)
 	if err != nil {
 		logutil.Error("OpenAI API error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
@@ -373,6 +393,9 @@ func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWrite
 }
 
 // estimateInputTokens provides a rough estimate of input tokens.
+// Uses a simple character-based heuristic (~4 chars per token) since
+// we don't have access to the upstream provider's tokenizer.
+// Actual token counts may vary significantly depending on the model.
 func estimateInputTokens(req *openai.ChatCompletionRequest) int {
 	tokens := 0
 	for _, msg := range req.Messages {

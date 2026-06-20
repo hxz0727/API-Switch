@@ -2,7 +2,7 @@
 
 > Gitee 镜像: https://gitee.com/776311606/API-Switch
 
-> Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen（通义千问）、GLM（智谱）、Moonshot（月之暗面）等国产大模型，协议自动转换，零配置即用。
+> Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen（通义千问）、GLM（智谱）、Moonshot（月之暗面）、Agnes AI 等大模型，协议自动转换，零配置即用。
 
 接收 Anthropic 格式请求，根据模型名自动路由到对应提供商，协议自动转换，模型即切即用。
 
@@ -18,7 +18,7 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **零配置切换模型** — `api-switch use <model>` 即刻切换，Claude Code 热加载
 - **多提供商支持** — Anthropic、OpenAI、DeepSeek、Qwen、Moonshot 等任意 OpenAI 兼容 API
 - **协议自动转换** — Anthropic ↔ OpenAI 双向转换，含流式 SSE、工具调用、图片
-- **Provider 模板** — 内置 9+ 国产厂商预设，一条命令添加
+- **Provider 模板** — 内置 10+ 厂商预设，一条命令添加
 - **实时监控** — Web 仪表盘 + 终端实时日志
 - **热加载配置** — 修改配置文件自动生效，无需重启
 - **一键诊断** — `api-switch doctor` 快速定位配置问题
@@ -40,6 +40,9 @@ npm install -g api-switch-cc
 
 # DeepSeek — 自动填充 base_url、type、建议模型
 api-switch setup deepseek --key sk-xxx
+
+# Agnes AI — 免费大模型，注册即用
+api-switch setup agnes --key sk-xxx
 
 # 启动
 api-switch serve

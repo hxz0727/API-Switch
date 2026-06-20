@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,7 +42,11 @@ func openAIEndpoint(baseURL string) string {
 }
 
 func (c *OpenAIClient) newRequest(body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest("POST", openAIEndpoint(c.cfg.BaseURL), body)
+	return c.newRequestWithContext(context.Background(), body)
+}
+
+func (c *OpenAIClient) newRequestWithContext(ctx context.Context, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", openAIEndpoint(c.cfg.BaseURL), body)
 	if err != nil {
 		return nil, err
 	}
@@ -52,12 +57,17 @@ func (c *OpenAIClient) newRequest(body io.Reader) (*http.Request, error) {
 
 // SendMessage sends a non-streaming request to the OpenAI-compatible API.
 func (c *OpenAIClient) SendMessage(req *openai.ChatCompletionRequest) (*openai.ChatCompletionResponse, error) {
+	return c.SendMessageWithContext(context.Background(), req)
+}
+
+// SendMessageWithContext sends a non-streaming request with context for cancellation.
+func (c *OpenAIClient) SendMessageWithContext(ctx context.Context, req *openai.ChatCompletionRequest) (*openai.ChatCompletionResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := c.newRequest(bytes.NewReader(body))
+	httpReq, err := c.newRequestWithContext(ctx, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +85,7 @@ func (c *OpenAIClient) SendMessage(req *openai.ChatCompletionRequest) (*openai.C
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai API error (status %d): %s", resp.StatusCode, string(rawBody))
+		return nil, fmt.Errorf("openai API error (status %d): %s", resp.StatusCode, truncateBody(string(rawBody), 500))
 	}
 
 	// Some providers (e.g. APIFree) return errors with HTTP 200.
@@ -97,7 +107,7 @@ func (c *OpenAIClient) SendMessage(req *openai.ChatCompletionRequest) (*openai.C
 		return nil, fmt.Errorf("failed to decode response: %w\nraw body: %s", err, string(rawBody))
 	}
 	if len(oaiResp.Choices) == 0 {
-		log.Printf("WARNING: OpenAI response has 0 choices. Raw body: %s", string(rawBody))
+		log.Printf("WARNING: OpenAI response has 0 choices. Raw body: %s", truncateBody(string(rawBody), 500))
 	}
 	return &oaiResp, nil
 }
@@ -233,4 +243,12 @@ func (c *OpenAIClient) ListModels() ([]string, error) {
 		}
 	}
 	return models, nil
+}
+
+// truncateBody truncates a response body string to maxLen characters for safe logging.
+func truncateBody(body string, maxLen int) string {
+	if len(body) <= maxLen {
+		return body
+	}
+	return body[:maxLen] + "...(truncated)"
 }

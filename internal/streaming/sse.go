@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -63,6 +64,8 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 
 		var chunk openai.ChatCompletionChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// Malformed SSE data — log and skip
+			log.Printf("[DEBUG] SSE parse error (skipping chunk): %v, raw: %.200s", err, data)
 			continue
 		}
 

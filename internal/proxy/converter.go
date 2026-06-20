@@ -123,7 +123,10 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 				oaiMsg.ToolCalls = toolCalls
 			}
 		} else if msg.Role == "user" && hasContentBeyondText(msg.Content) {
-			// For user messages with images, convert content blocks
+			// For user messages with images, convert content blocks.
+			// NOTE: Images are converted to text placeholders — actual image data is not
+			// passed to the upstream API. This is a known limitation. Full multi-modal
+			// conversion (Anthropic image blocks -> OpenAI vision format) is not yet implemented.
 			var blocks []anthropic.ContentBlock
 			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
 				var parts []string

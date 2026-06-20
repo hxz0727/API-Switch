@@ -2,13 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/hxz0727/API-Switch/internal/config"
@@ -16,6 +20,7 @@ import (
 	"github.com/hxz0727/API-Switch/internal/logutil"
 	"github.com/hxz0727/API-Switch/internal/provider"
 	"github.com/hxz0727/API-Switch/internal/proxy"
+	"github.com/hxz0727/API-Switch/internal/update"
 	usageutil "github.com/hxz0727/API-Switch/internal/usage"
 )
 
@@ -25,7 +30,7 @@ var (
 )
 
 // Version injected at build time via -ldflags, or falls back to default.
-var Version = "0.2.3-dev"
+var Version = "0.4.6-dev"
 
 func main() {
 	rootCmd := &cobra.Command{
@@ -44,6 +49,7 @@ func main() {
 	serveCmd.Flags().StringVarP(&cfgPath, "config", "c", "", "config file path")
 	serveCmd.Flags().CountP("verbose", "v", "Verbose output (-v for more info, -vv for debug)")
 	serveCmd.Flags().BoolP("quiet", "q", false, "Suppress all non-error output")
+	serveCmd.Flags().Bool("no-auto-update", false, "Disable automatic update check on startup")
 
 	// use command - switch the active model in Claude Code
 	useCmd := &cobra.Command{
@@ -144,7 +150,7 @@ Examples:
 		Long: `Manage provider configurations.
 
 Supports built-in presets for popular providers:
-  deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan
+  deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan, agnes
 
 Examples:
   api-switch provider list                          List all configured providers
@@ -674,7 +680,37 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if configPath == "" {
 		configPath = config.DefaultConfigPath()
 	}
-	return srv.StartWithConfigFile(addr, configPath)
+
+	// Auto-update check (runs in background, does not block startup)
+	noAutoUpdate, _ := cmd.Flags().GetBool("no-auto-update")
+	if !noAutoUpdate {
+		go update.AutoUpdate(Version)
+	}
+
+	// Handle graceful shutdown on SIGINT/SIGTERM
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.StartWithConfigFile(addr, configPath)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return err
+		}
+	case sig := <-sigCh:
+		logutil.Info("Received signal %v, shutting down gracefully...", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			logutil.Error("Shutdown error: %v", err)
+		}
+		logutil.Info("Server stopped")
+	}
+	return nil
 }
 
 func runModelList(cmd *cobra.Command, args []string) error {
@@ -940,7 +976,7 @@ func runProviderAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	if url == "" {
-		return fmt.Errorf("--url is required (no known preset for provider %q)\n  Known presets: deepseek, qwen, moonshot, glm, kimi, yi, step, ernie, hunyuan", name)
+		return fmt.Errorf("--url is required (no known preset for provider %q)\n  Known presets: deepseek, qwen, moonshot, glm, kimi, yi, step, ernie, hunyuan, agnes", name)
 	}
 	if provType == "" {
 		return fmt.Errorf("--type is required (must be 'anthropic' or 'openai')")
@@ -1223,6 +1259,130 @@ func runRestart(cmd *cobra.Command, args []string) error {
 func runUpdate(cmd *cobra.Command, args []string) error {
 	checkOnly, _ := cmd.Flags().GetBool("check")
 
+	currentBinary, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find current binary: %w", err)
+	}
+
+	// Try GitHub/Gitee release API for latest version
+	latest := update.CheckLatestVersion()
+	if latest != "" {
+		currentVer := strings.TrimPrefix(Version, "v")
+		latestVer := strings.TrimPrefix(latest, "v")
+
+		if currentVer == latestVer {
+			fmt.Printf("Already up to date (v%s)\n", currentVer)
+			return nil
+		}
+
+		fmt.Printf("Current: v%s  →  Latest: %s\n", currentVer, latest)
+		fmt.Println()
+
+		if checkOnly {
+			fmt.Printf("To update, run: api-switch update\n")
+			return nil
+		}
+
+		fmt.Println("Downloading and installing update...")
+		if err := update.DoUpdate(currentBinary, latest); err != nil {
+			fmt.Printf("Direct download failed: %v\n", err)
+			fmt.Println("Trying npm update instead...")
+			return runUpdateLegacy(checkOnly)
+		}
+
+		fmt.Printf("Updated to %s. Restarting...\n", latest)
+		if err := update.ExecSelf(currentBinary); err != nil {
+			return fmt.Errorf("restart failed: %w — please run 'api-switch serve' manually", err)
+		}
+		return nil
+	}
+
+	// GitHub/Gitee API unavailable — try npm
+	if isNPMInstalled() {
+		binaryVer := strings.TrimPrefix(Version, "v")
+		latestNPM, err := getLatestNPMVersion()
+		if err == nil && latestNPM != "" {
+			currentNPM := getInstalledNPMVersion()
+
+			if currentNPM != "" && binaryVer != latestNPM {
+				fmt.Printf("npm package: %s  →  binary: v%s\n", latestNPM, binaryVer)
+				fmt.Println()
+				if checkOnly {
+					return nil
+				}
+				// Force npm update to refresh the cached binary
+				fmt.Println("Updating via npm to refresh cached binary...")
+				if err := runNPMUpdate(); err != nil {
+					return err
+				}
+				// Also try direct download
+				return update.DoUpdate(currentBinary, "v"+latestNPM)
+			}
+			fmt.Printf("Already up to date (npm %s, binary v%s)\n", latestNPM, binaryVer)
+			return nil
+		}
+
+		fmt.Printf("npm installed (binary v%s). Could not check latest version.\n", binaryVer)
+		return nil
+	}
+
+	// Last resort: go install
+	_, goErr := execCommand("which", "go")
+	if goErr == nil {
+		if checkOnly {
+			fmt.Printf("Go install: github.com/hxz0727/API-Switch/cmd/api-switch@latest\n")
+			return nil
+		}
+		fmt.Println("Updating via go install...")
+		output, err := execCommand("bash", "-c", "GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go install github.com/hxz0727/API-Switch/cmd/api-switch@latest")
+		if err != nil {
+			return fmt.Errorf("go install failed: %s", string(output))
+		}
+		fmt.Println("Updated successfully. Run 'api-switch version' to verify.")
+		return nil
+	}
+
+	return fmt.Errorf("Cannot determine update method. Reinstall:\n  npm install -g api-switch-cc")
+}
+
+// --- update helpers ---
+
+func isNPMInstalled() bool {
+	out, err := execCommand("npm", "list", "-g", "api-switch-cc", "--depth=0")
+	return err == nil && strings.Contains(string(out), "api-switch-cc")
+}
+
+func getLatestNPMVersion() (string, error) {
+	out, err := execCommand("npm", "view", "api-switch-cc", "version")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func getInstalledNPMVersion() string {
+	out, err := execCommand("npm", "list", "-g", "api-switch-cc", "--depth=0", "--json")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, `"version"`) {
+			return strings.Trim(strings.Split(line, `"`)[3], `"`)
+		}
+	}
+	return ""
+}
+
+func runNPMUpdate() error {
+	out, err := execCommand("npm", "update", "-g", "api-switch-cc")
+	if err != nil {
+		return fmt.Errorf("npm update failed: %s", string(out))
+	}
+	return nil
+}
+
+// runUpdateLegacy is kept for fallback compatibility.
+func runUpdateLegacy(checkOnly bool) error {
 	// Check if installed via npm
 	npmGlobal, npmErr := execCommand("npm", "list", "-g", "api-switch-cc", "--depth=0")
 	if npmErr == nil && strings.Contains(string(npmGlobal), "api-switch-cc") {

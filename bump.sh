@@ -20,7 +20,7 @@ green()  { echo -e "\033[32m$*\033[0m"; }
 yellow() { echo -e "\033[33m$*\033[0m"; }
 
 current_version() {
-  grep -oP 'const VERSION = "\K[^"]+' npm/api-switch.js 2>/dev/null || echo "unknown"
+  grep -oP '"version":\s*"\K[^"]+' npm/package.json 2>/dev/null || echo "unknown"
 }
 
 npm_version() {
@@ -61,23 +61,14 @@ echo ""
 echo "  Bumping to $VER (npm $NPM_VER)..."
 echo ""
 
-# ── 1. Update npm wrapper version ──
-sed -i "s/const VERSION = \"[^\"]*\"/const VERSION = \"$VER\"/" npm/api-switch.js
-sed -i "s/const DOWNLOAD_VERSION = \"[^\"]*\"/const DOWNLOAD_VERSION = \"$VER\"/" npm/install.js
-green "  npm/api-switch.js → $VER"
-green "  npm/install.js     → $VER"
-
-# ── 2. Update npm package.json version ──
+# ── 1. Update npm package.json version ──
+# (api-switch.js and install.js now read version from package.json dynamically)
 sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NPM_VER\"/" npm/package.json
 green "  npm/package.json   → $NPM_VER"
 
-# ── 3. Verify ──
+# ── 2. Verify ──
 ACTUAL=$(current_version)
 ACTUAL_NPM=$(npm_version)
-if [ "$ACTUAL" != "$VER" ]; then
-  red "  api-switch.js VERSION mismatch: expected $VER, got $ACTUAL"
-  exit 1
-fi
 if [ "$ACTUAL_NPM" != "$NPM_VER" ]; then
   red "  package.json version mismatch: expected $NPM_VER, got $ACTUAL_NPM"
   exit 1
@@ -92,7 +83,7 @@ fi
 
 # ── 4. Build binary ──
 echo "  Building binary..."
-if go build -ldflags="-s -w -X main.Version=$VER" -o /tmp/api-switch-release ./cmd/api-switch/ 2>&1; then
+if go build -ldflags="-s -w -X main.Version=$NPM_VER" -o /tmp/api-switch-release ./cmd/api-switch/ 2>&1; then
   VERIFIED=$("/tmp/api-switch-release" version 2>/dev/null || echo "FAIL")
   green "  Binary built: $VERIFIED"
 else
@@ -100,8 +91,8 @@ else
 fi
 echo ""
 
-# ── 5. Commit + tag + push to GitHub ──
-git add npm/api-switch.js npm/install.js npm/package.json
+# ── 4. Commit + tag + push to GitHub ──
+git add npm/package.json
 git commit -m "release: $VER" 2>&1
 git tag -d "$VER" 2>/dev/null || true
 git tag "$VER"

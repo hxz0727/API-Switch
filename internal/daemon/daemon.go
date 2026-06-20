@@ -90,11 +90,19 @@ func Start(binary string, port int, cfgPath string) (int, error) {
 		return 0, fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	// Write PID file
-	if err := os.WriteFile(pidFile(), []byte(strconv.Itoa(cmd.Process.Pid)), 0644); err != nil {
+	// Write PID file atomically using temp file + rename to avoid race
+	pidStr := strconv.Itoa(cmd.Process.Pid)
+	tmpFile := pidFile() + ".tmp"
+	if err := os.WriteFile(tmpFile, []byte(pidStr), 0644); err != nil {
 		cmd.Process.Kill()
 		out.Close()
-		return 0, fmt.Errorf("failed to write PID file: %w", err)
+		return 0, fmt.Errorf("failed to write PID temp file: %w", err)
+	}
+	if err := os.Rename(tmpFile, pidFile()); err != nil {
+		cmd.Process.Kill()
+		out.Close()
+		os.Remove(tmpFile)
+		return 0, fmt.Errorf("failed to rename PID file: %w", err)
 	}
 
 	// Don't wait for the child — release the file descriptor and let it run

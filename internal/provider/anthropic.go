@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,7 +28,11 @@ func NewAnthropicClient(cfg *config.ProviderConfig) *AnthropicClient {
 }
 
 func (c *AnthropicClient) newRequest(body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest("POST", c.cfg.BaseURL+"/v1/messages", body)
+	return c.newRequestWithContext(context.Background(), body)
+}
+
+func (c *AnthropicClient) newRequestWithContext(ctx context.Context, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", c.cfg.BaseURL+"/v1/messages", body)
 	if err != nil {
 		return nil, err
 	}
@@ -39,12 +44,17 @@ func (c *AnthropicClient) newRequest(body io.Reader) (*http.Request, error) {
 
 // SendMessage sends a non-streaming request to the Anthropic API.
 func (c *AnthropicClient) SendMessage(req *anthropic.MessagesRequest) (*anthropic.MessagesResponse, error) {
+	return c.SendMessageWithContext(context.Background(), req)
+}
+
+// SendMessageWithContext sends a non-streaming request with context for cancellation.
+func (c *AnthropicClient) SendMessageWithContext(ctx context.Context, req *anthropic.MessagesRequest) (*anthropic.MessagesResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := c.newRequest(bytes.NewReader(body))
+	httpReq, err := c.newRequestWithContext(ctx, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -55,14 +65,18 @@ func (c *AnthropicClient) SendMessage(req *anthropic.MessagesRequest) (*anthropi
 	}
 	defer resp.Body.Close()
 
+	// Read the full body before decoding to avoid "body already closed" issues
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		var errBody map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&errBody)
-		return nil, fmt.Errorf("anthropic API error (status %d): %v", resp.StatusCode, errBody)
+		return nil, fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(rawBody))
 	}
 
 	var antResp anthropic.MessagesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&antResp); err != nil {
+	if err := json.Unmarshal(rawBody, &antResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	return &antResp, nil
@@ -87,14 +101,17 @@ func (c *AnthropicClient) SendMessageRaw(req interface{}) (map[string]interface{
 	}
 	defer resp.Body.Close()
 
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		var errBody map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&errBody)
-		return nil, fmt.Errorf("anthropic API error (status %d): %v", resp.StatusCode, errBody)
+		return nil, fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(rawBody))
 	}
 
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(rawBody, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	return result, nil
@@ -129,9 +146,8 @@ func (c *AnthropicClient) StreamMessage(req *anthropic.MessagesRequest) (io.Read
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		var errBody map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&errBody)
-		return nil, fmt.Errorf("anthropic API error (status %d): %v", resp.StatusCode, errBody)
+		rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("anthropic streaming error (status %d): %s", resp.StatusCode, string(rawBody))
 	}
 
 	return resp.Body, nil

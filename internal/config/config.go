@@ -268,6 +268,9 @@ type ProviderTemplate struct {
 }
 
 // KnownProviders returns a map of known provider presets.
+// NOTE: These URLs are current as of the project's last update. Provider APIs may
+// change their endpoints over time. If a provider becomes unreachable, verify the
+// base URL against the provider's current documentation.
 func KnownProviders() map[string]ProviderTemplate {
 	return map[string]ProviderTemplate{
 		"deepseek": {
@@ -329,6 +332,12 @@ func KnownProviders() map[string]ProviderTemplate {
 			BaseURL: "https://api.apifree.ai/agent/v1",
 			DefaultMaxTokens: 4096,
 			Models: []string{"deepseek-chat", "deepseek-r1", "gpt-4o-mini", "gemini-2.0-flash", "claude-3.5-haiku", "skywork-ai/skyclaw-v1"},
+		},
+		"agnes": {
+			Type:    "openai",
+			BaseURL: "https://apihub.agnes-ai.com/v1",
+			DefaultMaxTokens: 8192,
+			Models: []string{"agnes-1.5-flash", "agnes-2.0-flash"},
 		},
 	}
 }
