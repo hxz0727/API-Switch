@@ -68,17 +68,28 @@ function ensureInstalled() {
   console.log("Installing api-switch " + VERSION + " for " + plat + "...");
   if (tryGitHubRaw(plat)) return;
 
-  // ── Step 2: Gitee clone + build (China mirror, needs Go + Git) ──
+  // ── Step 2: Gitee raw binary download (China mirror) ──
   console.log("GitHub not reachable, trying Gitee mirror...");
   if (tryGiteeRaw(plat)) return;
+
+  // ── Step 3: Gitee clone + go build (ensures correct version) ──
   if (tryGiteeBuild(plat)) return;
 
-  // ── Step 3: go install (needs Go only) ──
+  // ── Step 4: go install (needs Go only) ──
   if (tryGoInstall(plat)) return;
 
   // ── All failed: friendly error ──
   printInstallHelp(plat);
   process.exit(1);
+}
+
+function verifyBinary() {
+  try {
+    const ver = execSync(`"${BIN_PATH}" version`, { encoding: "utf8", stdio: "pipe", timeout: 5000 }).trim();
+    return ver.includes(VERSION);
+  } catch (_) {
+    return false;
+  }
 }
 
 function tryGitHubRaw(plat) {
@@ -93,6 +104,10 @@ function tryGitHubRaw(plat) {
       { stdio: "pipe", timeout: 150000 }
     );
     chmodSync(BIN_PATH, 0o755);
+    if (!verifyBinary()) {
+      console.log("  Downloaded binary version mismatch, retrying...");
+      return false;
+    }
     console.log("  Done (GitHub)");
     return true;
   } catch (_) {
@@ -106,6 +121,10 @@ function tryGiteeRaw(plat) {
     const url = `${GITEE_RAW}/api-switch-${plat}`;
     execSync(`curl -sSL --connect-timeout 10 --max-time 120 "${url}" -o "${BIN_PATH}"`, { stdio: "pipe", timeout: 150000 });
     chmodSync(BIN_PATH, 0o755);
+    if (!verifyBinary()) {
+      console.log("  Gitee binary is outdated, trying build instead...");
+      return false;
+    }
     console.log("  Done (Gitee)");
     return true;
   } catch (_) {}
@@ -127,6 +146,10 @@ function tryGiteeBuild(plat) {
     );
     execSync(`rm -rf ${tmp}`, { stdio: "pipe" });
     chmodSync(BIN_PATH, 0o755);
+    if (!verifyBinary()) {
+      console.log("  Gitee build produced wrong version");
+      return false;
+    }
     console.log("  Done (Gitee + go build)");
     return true;
   } catch (_) {}
@@ -149,6 +172,10 @@ function tryGoInstall(plat) {
     if (existsSync(goBin)) {
       copyFileSync(goBin, BIN_PATH);
       chmodSync(BIN_PATH, 0o755);
+      if (!verifyBinary()) {
+        console.log("  go install produced wrong version");
+        return false;
+      }
       console.log("  Done (go install)");
       return true;
     }
