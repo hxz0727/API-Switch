@@ -190,6 +190,8 @@ function tryGiteeBuild(plat) {
   }
   try {
     const tmp = join(__dirname, ".gitee-build");
+    // Remove stale binary from previous failed download attempts
+    try { unlinkSync(BIN_PATH); } catch (_) {}
     execSync(`rm -rf ${tmp} && git clone --depth=1 ${GITEE_REPO} ${tmp}`, { stdio: "pipe", timeout: 60000 });
     execSync(
       `cd ${tmp} && GOTOOLCHAIN=local GOPROXY=https://goproxy.cn,direct go build -ldflags="-s -w -X main.Version=${VERSION.replace(/^v/, '')}" -o "${BIN_PATH}" ./cmd/api-switch/`,
@@ -216,10 +218,12 @@ function tryGoInstall(plat) {
     return false;
   }
   try {
+    // Clean stale binary and goproxy cache to avoid stale downloads
+    try { unlinkSync(BIN_PATH); } catch (_) {}
     const gopath = (execSync("go env GOPATH", { encoding: "utf8", stdio: "pipe" }) || "~/go").trim();
     const goBin = join(gopath, "bin", BIN_NAME);
     execSync(
-      `GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go install github.com/hxz0727/API-Switch/cmd/api-switch@${VERSION}`,
+      `GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local GONOSUMCHECK=* go clean -modcache 2>/dev/null; GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-mod=mod GOTOOLCHAIN=local go install github.com/hxz0727/API-Switch/cmd/api-switch@${VERSION}`,
       { stdio: "pipe", timeout: 120000 }
     );
     if (existsSync(goBin)) {
