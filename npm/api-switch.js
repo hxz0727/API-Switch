@@ -15,7 +15,7 @@
 
 "use strict";
 
-const { existsSync, mkdirSync, chmodSync, unlinkSync, copyFileSync } = require("fs");
+const { existsSync, mkdirSync, chmodSync, unlinkSync, copyFileSync, readFileSync } = require("fs");
 const { join } = require("path");
 const { execSync, spawnSync } = require("child_process");
 
@@ -23,11 +23,13 @@ const PKG = require("./package.json");
 const VERSION = "v" + PKG.version;
 const BIN_DIR = join(__dirname, ".bin");
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 const BIN_NAME = IS_WIN ? "api-switch.exe" : "api-switch";
 const BIN_PATH = join(BIN_DIR, BIN_NAME);
 
 const GITEE_REPO = "https://gitee.com/776311606/API-Switch.git";
-const GITEE_RAW  = `https://gitee.com/776311606/API-Switch/raw/release`;
+// Gitee raw URL with version subdirectory: release/vX.Y.Z/api-switch-{plat}
+const GITEE_RAW  = `https://gitee.com/776311606/API-Switch/raw/release/${VERSION}`;
 const GH_RELEASE = `https://github.com/hxz0727/API-Switch/releases/download/${VERSION}`;
 
 function platform() {
@@ -64,13 +66,13 @@ function ensureInstalled() {
     process.exit(1);
   }
 
-  // ── Step 1: GitHub raw binary download (no tar, no Go, just curl) ──
+  // ── Step 1: Gitee raw binary download (China mirror, fast) ──
   console.log("Installing api-switch " + VERSION + " for " + plat + "...");
-  if (tryGitHubRaw(plat)) return;
-
-  // ── Step 2: Gitee raw binary download (China mirror) ──
-  console.log("GitHub not reachable, trying Gitee mirror...");
   if (tryGiteeRaw(plat)) return;
+
+  // ── Step 2: GitHub raw binary download ──
+  console.log("Gitee not reachable, trying GitHub...");
+  if (tryGitHubRaw(plat)) return;
 
   // ── Step 3: Gitee clone + go build (ensures correct version) ──
   if (tryGiteeBuild(plat)) return;
@@ -84,9 +86,48 @@ function ensureInstalled() {
 }
 
 function verifyBinary() {
+  // Check that the file is a real binary, not an HTML error page
+  if (!isValidBinary()) {
+    console.log("  Downloaded file is not a valid binary (likely an HTML error page)");
+    return false;
+  }
   try {
     const ver = execSync(`"${BIN_PATH}" version`, { encoding: "utf8", stdio: "pipe", timeout: 5000 }).trim();
-    return ver.includes(VERSION);
+    // Strict version match: extract semver from output and compare
+    const match = ver.match(/v?(\d+\.\d+\.\d+)/);
+    if (!match) {
+      console.log(`  Binary output unexpected: "${ver}"`);
+      return false;
+    }
+    const binaryVer = match[1];
+    const expectedVer = VERSION.replace(/^v/, "");
+    if (binaryVer !== expectedVer) {
+      console.log(`  Binary version mismatch: got v${binaryVer}, expected ${VERSION}`);
+      return false;
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// isValidBinary checks the file magic bytes to ensure it's a real binary,
+// not an HTML error page or other garbage downloaded from a broken URL.
+function isValidBinary() {
+  try {
+    const buf = readFileSync(BIN_PATH);
+    if (buf.length < 4) return false;
+    // ELF (Linux): starts with \x7fELF
+    if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) return true;
+    // Mach-O (macOS): starts with various magic numbers
+    if (IS_MAC) {
+      const macho64 = buf.readUInt32LE(0);
+      if (macho64 === 0xfeedfacf || macho64 === 0xcffaedfe ||
+          macho64 === 0xfeedface || macho64 === 0xcefaedfe) return true;
+    }
+    // PE (Windows): starts with MZ
+    if (buf[0] === 0x4d && buf[1] === 0x5a) return true;
+    return false;
   } catch (_) {
     return false;
   }
@@ -104,14 +145,18 @@ function tryGitHubRaw(plat) {
       { stdio: "pipe", timeout: 40000 }
     );
     chmodSync(BIN_PATH, 0o755);
+    if (!isValidBinary()) {
+      console.log("  GitHub returned non-binary content (network issue or wrong URL)");
+      return false;
+    }
     if (!verifyBinary()) {
       console.log("  GitHub binary version mismatch, retrying...");
       return false;
     }
     console.log("  Done (GitHub)");
     return true;
-  } catch (_) {
-    console.log("  GitHub not reachable");
+  } catch (e) {
+    console.log("  GitHub not reachable: " + (e.message || e));
   }
   return false;
 }
@@ -121,20 +166,26 @@ function tryGiteeRaw(plat) {
     const url = `${GITEE_RAW}/api-switch-${plat}`;
     execSync(`curl -sSL --connect-timeout 5 --max-time 30 "${url}" -o "${BIN_PATH}"`, { stdio: "pipe", timeout: 40000 });
     chmodSync(BIN_PATH, 0o755);
+    if (!isValidBinary()) {
+      console.log("  Gitee returned non-binary content (the release branch may not have a binary yet)");
+      return false;
+    }
     if (!verifyBinary()) {
       console.log("  Gitee binary is outdated, trying build instead...");
       return false;
     }
     console.log("  Done (Gitee)");
     return true;
-  } catch (_) {}
-  console.log("  Gitee download failed");
+  } catch (e) {
+    console.log("  Gitee download failed: " + (e.message || e));
+  }
   return false;
 }
 
 function tryGiteeBuild(plat) {
   if (!hasGo() || !hasGit()) {
-    console.log("  Go/Git not found, skipped");
+    if (!hasGit()) console.log("  Git not found, skipped");
+    if (!hasGo()) console.log("  Go not found, skipped");
     return false;
   }
   try {
@@ -152,8 +203,10 @@ function tryGiteeBuild(plat) {
     }
     console.log("  Done (Gitee + go build)");
     return true;
-  } catch (_) {}
-  console.log("  Gitee build failed");
+  } catch (e) {
+    const msg = (e.stderr || e.message || "").toString().split("\n").filter(Boolean).slice(-3).join("\n    ");
+    console.log("  Gitee build failed: " + (msg || e.message));
+  }
   return false;
 }
 
@@ -179,8 +232,11 @@ function tryGoInstall(plat) {
       console.log("  Done (go install)");
       return true;
     }
-  } catch (_) {}
-  console.log("  go install failed");
+    console.log("  go install completed but binary not found at " + goBin);
+  } catch (e) {
+    const msg = (e.stderr || e.message || "").toString().split("\n").filter(Boolean).slice(-3).join("\n    ");
+    console.log("  go install failed: " + (msg || e.message));
+  }
   return false;
 }
 
@@ -236,5 +292,27 @@ function printInstallHelp(plat) {
 }
 
 ensureInstalled();
+
+// Verify binary one final time before execution
+if (!existsSync(BIN_PATH)) {
+  console.error("Error: binary not found at " + BIN_PATH);
+  process.exit(1);
+}
+
+if (!isValidBinary()) {
+  console.error("Error: " + BIN_PATH + " is not a valid executable (may have been corrupted during download)");
+  process.exit(1);
+}
+
 const r = spawnSync(BIN_PATH, process.argv.slice(2), { stdio: "inherit" });
+if (r.error) {
+  if (r.error.code === "ENOENT") {
+    console.error("Error: cannot execute " + BIN_PATH + " — file may be missing or corrupted");
+  } else if (r.error.code === "EACCES") {
+    console.error("Error: permission denied executing " + BIN_PATH + " — try reinstalling");
+  } else {
+    console.error("Error executing binary: " + r.error.message);
+  }
+  process.exit(1);
+}
 process.exit(r.status ?? 1);

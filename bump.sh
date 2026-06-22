@@ -116,9 +116,10 @@ if [ -f /tmp/api-switch-release ]; then
   if git clone --depth=1 https://gitee.com/776311606/API-Switch.git /tmp/gitee-release 2>/dev/null; then
     cd /tmp/gitee-release
     git checkout release 2>/dev/null || git checkout -b release
-    rm -rf * .github .gitignore 2>/dev/null || true
-    cp /tmp/api-switch-linux-amd64 api-switch-linux-amd64
-    git add -f api-switch-linux-amd64
+    # Place binary in versioned subdirectory: vX.Y.Z/api-switch-linux-amd64
+    mkdir -p "$VER"
+    cp /tmp/api-switch-linux-amd64 "$VER/api-switch-linux-amd64"
+    git add -f "$VER/api-switch-linux-amd64"
     git commit -m "release: $VER linux-amd64 binary" 2>&1 || true
     git push origin release --force 2>&1 || true
     cd "$ROOT"

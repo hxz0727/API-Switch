@@ -31,6 +31,7 @@ var (
 	// GitHubDownloadBase is the base URL for downloading release binaries from GitHub.
 	GitHubDownloadBase = "https://github.com/hxz0727/API-Switch/releases/download"
 	// GiteeRawBase is the base URL for downloading release binaries from Gitee.
+	// Binary is stored in versioned subdirectory: release/vX.Y.Z/api-switch-{plat}
 	GiteeRawBase = "https://gitee.com/776311606/API-Switch/raw/release"
 
 	// stateDir is the directory where update state is stored (injectable for tests).
@@ -96,12 +97,12 @@ func shouldCheck() bool {
 // CheckLatestVersion queries GitHub/Gitee for the latest release tag.
 // Returns the tag name (e.g. "v0.4.6") or empty string on failure.
 func CheckLatestVersion() string {
-	// Try GitHub first
-	if ver := fetchLatestVersion(GitHubReleaseAPI); ver != "" {
+	// Try Gitee first (China mirror)
+	if ver := fetchLatestVersion(GiteeReleaseAPI); ver != "" {
 		return ver
 	}
-	// Fall back to Gitee (China mirror)
-	if ver := fetchLatestVersion(GiteeReleaseAPI); ver != "" {
+	// Fall back to GitHub
+	if ver := fetchLatestVersion(GitHubReleaseAPI); ver != "" {
 		return ver
 	}
 	return ""
@@ -204,15 +205,15 @@ func DoUpdate(currentBinary string, latestVersion string) error {
 		return fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
-	// Try GitHub first, then Gitee
+	// Try Gitee first, then GitHub
 	urls := []string{
+		fmt.Sprintf("%s/%s/api-switch-%s", GiteeRawBase, latestVersion, plat),
 		fmt.Sprintf("%s/%s/api-switch-%s", GitHubDownloadBase, latestVersion, plat),
-		fmt.Sprintf("%s/api-switch-%s", GiteeRawBase, plat),
 	}
 
 	if runtime.GOOS == "windows" {
-		urls[0] = fmt.Sprintf("%s/%s/api-switch-windows-amd64.exe", GitHubDownloadBase, latestVersion)
-		urls[1] = fmt.Sprintf("%s/api-switch-windows-amd64.exe", GiteeRawBase)
+		urls[0] = fmt.Sprintf("%s/%s/api-switch-windows-amd64.exe", GiteeRawBase, latestVersion)
+		urls[1] = fmt.Sprintf("%s/%s/api-switch-windows-amd64.exe", GitHubDownloadBase, latestVersion)
 	}
 
 	var downloadErr error

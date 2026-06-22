@@ -113,7 +113,7 @@ function tryGiteeBuild(binPath) {
       { stdio: "pipe", timeout: 60000 }
     );
     execSync(
-      `cd ${tmpDir} && GOTOOLCHAIN=local GOPROXY=https://goproxy.cn,direct go build -ldflags="-s -w -X main.Version=v0.2.1" -o "${binPath}" ./cmd/api-switch/`,
+      `cd ${tmpDir} && GOTOOLCHAIN=local GOPROXY=https://goproxy.cn,direct go build -ldflags="-s -w -X main.Version=${DOWNLOAD_VERSION.replace(/^v/, '')}" -o "${binPath}" ./cmd/api-switch/`,
       { stdio: "pipe", timeout: 120000 }
     );
     execSync("rm -rf " + tmpDir, { stdio: "pipe" });
