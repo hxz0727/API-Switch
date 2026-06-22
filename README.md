@@ -31,7 +31,7 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **用量统计** — `api-switch usage` 按天统计 Token 用量、缓存命中率
 - **国内镜像** — Gitee 同步 + goproxy.cn 加速安装
 
-> **v0.4.7** — 新增 Agnes AI 支持、自动更新、优雅关闭、全面单元测试覆盖
+> **v0.4.13** — 新增版本化 Gitee 镜像、优先国内下载、自动更新修复
 
 ## ⚡ 快速开始
 
@@ -85,10 +85,10 @@ npm 包秒装（无 postinstall 阻塞），二进制在首次运行 `api-switch
 # 更新到最新版
 api-switch update
 # 或
-npm update -g api-switch-cc
+npm install -g api-switch-cc@latest
 ```
 
-**国内用户：** 若 GitHub 下载慢，npm 包会自动走 gitee.com 镜像或 go install 源码编译。
+**国内用户：** npm 包会自动优先从 gitee.com 版本化镜像下载（`release/vX.Y.Z/` 目录），其次尝试 GitHub，最后回退到源码编译或 go install。全程无需手动干预。
 
 ### 一键安装脚本
 
@@ -456,7 +456,7 @@ api-switch monitor
 api-switch update
 
 # 或手动
-npm update -g api-switch-cc
+npm install -g api-switch-cc@latest
 ```
 
 ### 如何修改端口？
@@ -486,7 +486,9 @@ curl -X POST http://localhost:8080/admin/reload
 
 ### 自动更新如何工作？
 
-`api-switch serve` 启动时在后台检查 GitHub/Gitee Release，24 小时内最多检查一次。发现新版本后自动下载对应平台的二进制、替换当前文件、无缝重启。可用 `--no-auto-update` 禁用。
+`api-switch serve` 启动时在后台检查 Gitee/GitHub Release API，24 小时内最多检查一次。发现新版本后自动下载对应平台的二进制（优先 Gitee 版本化镜像 `release/vX.Y.Z/`）、替换当前文件、无缝重启。`api-switch update` 可手动触发更新。可用 `--no-auto-update` 禁用。
+
+**更新优先级：** Gitee 镜像 → GitHub Release → npm 更新 → go install
 
 ## 📁 项目结构
 
