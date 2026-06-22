@@ -67,7 +67,7 @@ function install() {
   console.error("Installation failed. Try one of these:");
   console.error();
   console.error("  # Option A: Install via Go (quickest)");
-  console.error("  GOPROXY=https://goproxy.cn,direct go install github.com/hxz0727/API-Switch/cmd/api-switch@v0.2.1");
+  console.error("  GOPROXY=https://goproxy.cn,direct go install github.com/hxz0727/API-Switch/cmd/api-switch@" + DOWNLOAD_VERSION);
   console.error("  sudo cp ~/go/bin/api-switch /usr/local/bin/");
   console.error();
   console.error("  # Option B: Clone from Gitee and build");
@@ -99,7 +99,11 @@ function tryGoInstall(binPath, name) {
       console.log(`Installed to ${binPath}`);
       return true;
     }
-  } catch (_) {}
+    console.log("  go install completed but binary not found at " + goBin);
+  } catch (e) {
+    const msg = (e.stderr || e.message || "").toString().split("\n").filter(Boolean).slice(-2).join("; ");
+    console.log("  go install failed: " + (msg || e.message));
+  }
   return false;
 }
 
@@ -120,7 +124,10 @@ function tryGiteeBuild(binPath) {
     chmodSync(binPath, 0o755);
     console.log(`Installed to ${binPath}`);
     return true;
-  } catch (_) {}
+  } catch (e) {
+    const msg = (e.stderr || e.message || "").toString().split("\n").filter(Boolean).slice(-2).join("; ");
+    console.log("  Gitee build failed: " + (msg || e.message));
+  }
   return false;
 }
 

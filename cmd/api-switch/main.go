@@ -1334,7 +1334,9 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		fmt.Println("Updating via go install...")
-		output, err := execCommand("bash", "-c", "GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go install github.com/hxz0727/API-Switch/cmd/api-switch@latest")
+		cmd := exec.Command("go", "install", "github.com/hxz0727/API-Switch/cmd/api-switch@latest")
+		cmd.Env = append(os.Environ(), "GOPROXY=https://goproxy.cn,direct", "GOTOOLCHAIN=local")
+		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("go install failed: %s", string(output))
 		}
@@ -1437,7 +1439,9 @@ func runUpdateLegacy(checkOnly bool) error {
 			return nil
 		}
 		fmt.Println("Updating via go install...")
-		output, err := execCommand("bash", "-c", "GOPROXY=https://goproxy.cn,direct GOTOOLCHAIN=local go install github.com/hxz0727/API-Switch/cmd/api-switch@latest")
+		cmd := exec.Command("go", "install", "github.com/hxz0727/API-Switch/cmd/api-switch@latest")
+		cmd.Env = append(os.Environ(), "GOPROXY=https://goproxy.cn,direct", "GOTOOLCHAIN=local")
+		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("go install failed: %s", string(output))
 		}
