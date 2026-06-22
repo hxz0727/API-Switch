@@ -251,6 +251,11 @@ func platformKey() string {
 func downloadAndReplace(url, targetPath string) error {
 	logutil.Debug("Auto-update: downloading %s", url)
 
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		return fmt.Errorf("cannot create parent directory: %w", err)
+	}
+
 	// Download to temp file
 	tmpFile := targetPath + ".new"
 	client := &http.Client{Timeout: 5 * time.Minute}
