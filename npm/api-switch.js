@@ -100,12 +100,12 @@ function tryGitHubRaw(plat) {
     execSync(
       IS_WIN
         ? `powershell -Command "Invoke-WebRequest '${url}' -OutFile '${BIN_PATH}'"`
-        : `curl -sSL --connect-timeout 10 --max-time 120 "${url}" -o "${BIN_PATH}"`,
-      { stdio: "pipe", timeout: 150000 }
+        : `curl -sSL --connect-timeout 5 --max-time 30 "${url}" -o "${BIN_PATH}"`,
+      { stdio: "pipe", timeout: 40000 }
     );
     chmodSync(BIN_PATH, 0o755);
     if (!verifyBinary()) {
-      console.log("  Downloaded binary version mismatch, retrying...");
+      console.log("  GitHub binary version mismatch, retrying...");
       return false;
     }
     console.log("  Done (GitHub)");
@@ -119,7 +119,7 @@ function tryGitHubRaw(plat) {
 function tryGiteeRaw(plat) {
   try {
     const url = `${GITEE_RAW}/api-switch-${plat}`;
-    execSync(`curl -sSL --connect-timeout 10 --max-time 120 "${url}" -o "${BIN_PATH}"`, { stdio: "pipe", timeout: 150000 });
+    execSync(`curl -sSL --connect-timeout 5 --max-time 30 "${url}" -o "${BIN_PATH}"`, { stdio: "pipe", timeout: 40000 });
     chmodSync(BIN_PATH, 0o755);
     if (!verifyBinary()) {
       console.log("  Gitee binary is outdated, trying build instead...");
@@ -141,7 +141,7 @@ function tryGiteeBuild(plat) {
     const tmp = join(__dirname, ".gitee-build");
     execSync(`rm -rf ${tmp} && git clone --depth=1 ${GITEE_REPO} ${tmp}`, { stdio: "pipe", timeout: 60000 });
     execSync(
-      `cd ${tmp} && GOTOOLCHAIN=local GOPROXY=https://goproxy.cn,direct go build -ldflags="-s -w -X main.Version=${VERSION}" -o "${BIN_PATH}" ./cmd/api-switch/`,
+      `cd ${tmp} && GOTOOLCHAIN=local GOPROXY=https://goproxy.cn,direct go build -ldflags="-s -w -X main.Version=${VERSION.replace(/^v/, '')}" -o "${BIN_PATH}" ./cmd/api-switch/`,
       { stdio: "pipe", timeout: 120000 }
     );
     execSync(`rm -rf ${tmp}`, { stdio: "pipe" });
