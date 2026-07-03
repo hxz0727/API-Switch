@@ -31,7 +31,7 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **用量统计** — `api-switch usage` 按天统计 Token 用量、缓存命中率
 - **国内镜像** — Gitee 同步 + goproxy.cn 加速安装
 
-> **v0.4.13** — 新增版本化 Gitee 镜像、优先国内下载、自动更新修复
+> **v0.8.0** — 稳定版：全面修复 SSE 流转换、DeepSeek 兼容性、端口自动同步、新增商汤商量 & 英伟达、安全加固
 
 ## ⚡ 快速开始
 
@@ -145,7 +145,7 @@ api-switch provider add deepseek --key sk-xxx
 api-switch provider add qwen
 # → Enter API key for "qwen": _
 
-# 支持的厂商
+# 支持的厂商（共 13 个，运行 api-switch provider known 查看完整列表）
 # deepseek  → https://api.deepseek.com
 # qwen      → https://dashscope.aliyuncs.com/compatible-mode/v1
 # moonshot  → https://api.moonshot.cn/v1
@@ -157,6 +157,8 @@ api-switch provider add qwen
 # hunyuan   → https://api.hunyuan.cloud.tencent.com/v1
 # agnes     → https://apihub.agnes-ai.com/v1        （免费，注册即用）
 # apifree   → https://api.apifree.ai/agent/v1
+# sensenova → https://token.sensenova.cn/v1          （商汤商量）
+# nvidia    → https://integrate.api.nvidia.com/v1    （英伟达）
 
 # 自定义提供商
 api-switch provider add my-provider \
@@ -165,7 +167,8 @@ api-switch provider add my-provider \
   --key sk-xxx
 
 # 查看所有提供商
-api-switch provider list          # 也可用 provider ls
+api-switch provider list          # 已配置的提供商
+api-switch provider known         # 查看所有内置厂商预设（13 个）
 
 # 测试提供商连通性
 api-switch provider test deepseek # 也可用 provider ping
@@ -230,16 +233,21 @@ api-switch test deepseek-chat
 ### 启动服务
 
 ```bash
-# 默认 8080 端口
+# 默认 8080 端口（自动同步 settings.json）
 api-switch serve
 
-# 自定义端口 + 日志级别
-api-switch serve -p 9090 -vv          # debug 级别日志
-api-switch serve -q                     # 仅显示错误
-api-switch serve -v                     # 带请求详情
-api-switch serve --no-auto-update       # 跳过自动更新检查
+# 自定义端口 + 持久化到配置
+api-switch serve -p 9090
+# settings.json 和 .api-switch.yaml 自动同步
 
-# 配置热加载：修改 ~/.api-switch.yaml 后自动生效
+# 仅运行时使用，不保存到配置
+api-switch serve -p 9090 --no-save-port
+
+# 日志级别
+api-switch serve -vv                     # debug 级别日志
+api-switch serve -v                      # 带请求详情
+api-switch serve -q                      # 仅显示错误
+api-switch serve --no-auto-update        # 跳过自动更新检查
 ```
 
 ### 后台运行（Daemon）
