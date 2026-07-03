@@ -66,19 +66,25 @@ func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/messages", s.handleMessages)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		numModels := len(s.cfg.Models)
+		numProviders := len(s.cfg.Providers)
+		reqStats := s.tracker.Stats()["total_requests"]
+		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "ok",
-			"models":    len(s.cfg.Models),
-			"providers": len(s.cfg.Providers),
-			"requests":  s.tracker.Stats()["total_requests"],
+			"models":    numModels,
+			"providers": numProviders,
+			"requests":  reqStats,
 		})
 	})
 	// Admin / monitoring routes (specific routes must be registered BEFORE prefix routes)
-	mux.HandleFunc("/admin/reload", s.handleAdminReload)
-	mux.HandleFunc("/admin/stats", s.handleAdminStats)
-	mux.HandleFunc("/admin/events", s.handleAdminEvents)
-	mux.HandleFunc("/admin/", s.handleAdminDashboard)
+	// All admin endpoints are restricted to localhost for security.
+	mux.HandleFunc("/admin/reload", requireLocalhost(s.handleAdminReload))
+	mux.HandleFunc("/admin/stats", requireLocalhost(s.handleAdminStats))
+	mux.HandleFunc("/admin/events", requireLocalhost(s.handleAdminEvents))
+	mux.HandleFunc("/admin/", requireLocalhost(s.handleAdminDashboard))
 
 	// Start file watcher for hot-reload
 	if cfgPath != "" {
@@ -229,8 +235,8 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	ev.Provider = route.ProviderName
 	ev.ProviderType = route.ProviderType
 
-	logutil.Info("Request model=%s provider=%s type=%s actualModel=%s stream=%v",
-		antReq.Model, route.ProviderName, route.ProviderType, route.ActualModel, antReq.Stream)
+	logutil.Info("Request model=%s provider=%s type=%s actualModel=%s stream=%v max_tokens=%d",
+		antReq.Model, route.ProviderName, route.ProviderType, route.ActualModel, antReq.Stream, antReq.MaxTokens)
 
 	switch route.ProviderType {
 	case "anthropic":
@@ -324,9 +330,6 @@ func (s *Server) handleOpenAI(ctx context.Context, w http.ResponseWriter, antReq
 	// Get default max tokens from route (populated by router under lock)
 	defaultMaxTokens := route.DefaultMaxTokens
 
-	// Debug: log the raw messages and system field from Claude Code
-	logutil.Debug("DEBUG Anthropic request: model=%q system=%q messages=%+v", antReq.Model, string(antReq.System), antReq.Messages)
-
 	// Convert Anthropic request → OpenAI request
 	oaiReq := ConvertAnthropicToOpenAI(antReq, route.ActualModel, defaultMaxTokens)
 
@@ -364,7 +367,7 @@ func (s *Server) handleOpenAINonStreaming(ctx context.Context, w http.ResponseWr
 }
 
 func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWriter, oaiReq *openai.ChatCompletionRequest, route *RouteResult, requestedModel string, ev *monitor.RequestEvent) {
-	respBody, err := route.OpenAI.StreamMessage(oaiReq)
+	respBody, err := route.OpenAI.StreamMessageWithContext(ctx, oaiReq)
 	if err != nil {
 		logutil.Error("OpenAI streaming error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())
@@ -373,9 +376,6 @@ func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWrite
 		return
 	}
 	defer respBody.Close()
-
-	// Close upstream body when client disconnects
-	closeOnCancel(ctx, respBody)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -405,6 +405,7 @@ func estimateInputTokens(req *openai.ChatCompletionRequest) int {
 }
 
 // writeAnthropicError writes an Anthropic-format error response.
+// The message is sanitized to prevent leaking internal details.
 func writeAnthropicError(w http.ResponseWriter, status int, errType, message string) {
 	resp := struct {
 		Type  string `json:"type"`
@@ -416,10 +417,19 @@ func writeAnthropicError(w http.ResponseWriter, status int, errType, message str
 		Type: "error",
 	}
 	resp.Error.Type = errType
-	resp.Error.Message = message
+	resp.Error.Message = sanitizeErrorMessage(message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		logutil.Error("Failed to write error response: %v", err)
 	}
+}
+
+// sanitizeErrorMessage redacts potentially sensitive information from error messages.
+func sanitizeErrorMessage(msg string) string {
+	// Truncate to 500 chars
+	if len(msg) > 500 {
+		msg = msg[:500] + "...(truncated)"
+	}
+	return msg
 }

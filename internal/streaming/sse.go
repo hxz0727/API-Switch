@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -20,10 +19,13 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	msgID := generateMessageID()
-	contentBlockStarted := false
-	contentBlockIndex := 0
+	textBlockStarted := false
+	textBlockIndex := 0           // always index 0 for the text content block
+	nextBlockIndex := 0           // next available block index, incremented on each content_block_start
 	totalOutputTokens := 0
-	toolCallAccumulators := make(map[int]*toolCallAcc) // index -> accumulator
+	toolCallAccumulators := make(map[int]*toolCallAcc)
+	streamSawFinish := false
+	var streamUsage *openai.Usage
 
 	// Emit message_start
 	writeAnthropicEvent(writer, flusher, canFlush, "message_start", anthropic.MessageStartEvent{
@@ -44,6 +46,41 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 	// Emit ping
 	writeAnthropicEvent(writer, flusher, canFlush, "ping", map[string]string{"type": "ping"})
 
+	// done emits content_block_stop + message_delta + message_stop and returns nil.
+	done := func(reason *string) {
+		if textBlockStarted {
+			writeAnthropicEvent(writer, flusher, canFlush, "content_block_stop", anthropic.ContentBlockStopEvent{
+				Type:  "content_block_stop",
+				Index: textBlockIndex,
+			})
+		}
+		for _, acc := range toolCallAccumulators {
+			writeAnthropicEvent(writer, flusher, canFlush, "content_block_stop", anthropic.ContentBlockStopEvent{
+				Type:  "content_block_stop",
+				Index: acc.blockIndex,
+			})
+		}
+		outputTokens := totalOutputTokens
+		if streamUsage != nil && streamUsage.CompletionTokens > 0 {
+			outputTokens = streamUsage.CompletionTokens
+		}
+		writeAnthropicEvent(writer, flusher, canFlush, "message_delta", anthropic.MessageDeltaEvent{
+			Type: "message_delta",
+			Delta: anthropic.MessageDelta{
+				StopReason: reason,
+			},
+			Usage: anthropic.DeltaUsage{
+				OutputTokens: outputTokens,
+			},
+		})
+		writeAnthropicEvent(writer, flusher, canFlush, "message_stop", anthropic.MessageStopEvent{
+			Type: "message_stop",
+		})
+		if canFlush {
+			flusher.Flush()
+		}
+	}
+
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -59,13 +96,16 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 
 		// Check for stream end
 		if data == "[DONE]" {
-			break
+			if !streamSawFinish {
+				// Provider ended stream without finish_reason — close gracefully
+				s := "end_turn"
+				done(&s)
+			}
+			return nil
 		}
 
 		var chunk openai.ChatCompletionChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			// Malformed SSE data — log and skip
-			log.Printf("[DEBUG] SSE parse error (skipping chunk): %v, raw: %.200s", err, data)
 			continue
 		}
 
@@ -73,27 +113,33 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 			continue
 		}
 
+		// Capture usage from any chunk that has it (before finish_reason processing)
+		if chunk.Usage != nil {
+			streamUsage = chunk.Usage
+		}
+
 		choice := chunk.Choices[0]
 
-	// If there's content in the delta
+	// Forward content deltas (skip reasoning/thinking field)
 	if choice.Delta.Content != "" {
-		// Start content block if not started
-		if !contentBlockStarted {
+		// Start text content block if not started (index 0)
+		if !textBlockStarted {
 			writeAnthropicEvent(writer, flusher, canFlush, "content_block_start", anthropic.ContentBlockStartEvent{
 				Type:  "content_block_start",
-				Index: contentBlockIndex,
+				Index: textBlockIndex,
 				ContentBlock: anthropic.ContentBlock{
 					Type: "text",
 					Text: "",
 				},
 			})
-			contentBlockStarted = true
+			textBlockStarted = true
+			nextBlockIndex = textBlockIndex + 1
 		}
 
 		// Emit text delta
 		writeAnthropicEvent(writer, flusher, canFlush, "content_block_delta", anthropic.ContentBlockDeltaEvent{
 			Type:  "content_block_delta",
-			Index: contentBlockIndex,
+			Index: textBlockIndex,
 			Delta: anthropic.DeltaBlock{
 				Type: "text_delta",
 				Text: choice.Delta.Content,
@@ -112,12 +158,12 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 			acc = &toolCallAcc{id: tcd.ID, name: tcd.Function.Name}
 			toolCallAccumulators[tcd.Index] = acc
 
-			// Start a tool_use content block
-			contentBlockIndex++
-			acc.blockIndex = contentBlockIndex
+			// Start a tool_use content block at next available index
+			acc.blockIndex = nextBlockIndex
+			nextBlockIndex++
 			writeAnthropicEvent(writer, flusher, canFlush, "content_block_start", anthropic.ContentBlockStartEvent{
 				Type:  "content_block_start",
-				Index: contentBlockIndex,
+				Index: acc.blockIndex,
 				ContentBlock: anthropic.ContentBlock{
 					Type: "tool_use",
 					ID:   tcd.ID,
@@ -132,8 +178,8 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 				Type:  "content_block_delta",
 				Index: acc.blockIndex,
 				Delta: anthropic.DeltaBlock{
-					Type: "input_json_delta",
-					Text: tcd.Function.Arguments,
+					Type:        "input_json_delta",
+					PartialJSON: tcd.Function.Arguments,
 				},
 			})
 			totalOutputTokens++
@@ -141,49 +187,21 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 	}
 
 	// If there's a finish_reason, close up the stream
-	if choice.FinishReason != nil {
-		// Close text content block if started
-		if contentBlockStarted {
-			writeAnthropicEvent(writer, flusher, canFlush, "content_block_stop", anthropic.ContentBlockStopEvent{
-				Type:  "content_block_stop",
-				Index: contentBlockIndex,
-			})
-		}
-
-		// Close any accumulated tool call content blocks
-		for _, acc := range toolCallAccumulators {
-			writeAnthropicEvent(writer, flusher, canFlush, "content_block_stop", anthropic.ContentBlockStopEvent{
-				Type:  "content_block_stop",
-				Index: acc.blockIndex,
-			})
-		}
-
-		// Map finish_reason to stop_reason
-		stopReason := mapFinishReason(choice.FinishReason)
-
-		// Emit message_delta with stop_reason
-		writeAnthropicEvent(writer, flusher, canFlush, "message_delta", anthropic.MessageDeltaEvent{
-			Type: "message_delta",
-			Delta: anthropic.MessageDelta{
-				StopReason: stopReason,
-			},
-			Usage: anthropic.DeltaUsage{
-				OutputTokens: totalOutputTokens,
-			},
-		})
-
-		// Emit message_stop
-		writeAnthropicEvent(writer, flusher, canFlush, "message_stop", anthropic.MessageStopEvent{
-			Type: "message_stop",
-		})
+	// Note: some providers send "finish_reason":"" (empty string) in non-final chunks;
+	// json.Unmarshal sets FinishReason to a non-nil pointer pointing to "",
+	// so we must check the dereferenced value is non-empty.
+	if choice.FinishReason != nil && *choice.FinishReason != "" {
+		done(mapFinishReason(choice.FinishReason))
+		streamSawFinish = true
+		return nil
+	}
 	}
 
-		// Track usage if present in the final chunk
-		if chunk.Usage != nil {
-			totalOutputTokens = chunk.Usage.CompletionTokens
-		}
+	// scanner ended without [DONE] or finish_reason — close gracefully
+	if !streamSawFinish {
+		s := "end_turn"
+		done(&s)
 	}
-
 	return scanner.Err()
 }
 
@@ -234,7 +252,9 @@ func mapFinishReason(reason *string) *string {
 	if mapped, ok := mapping[*reason]; ok {
 		return &mapped
 	}
-	return reason
+	// Fallback for unknown values — do not leak provider-specific reasons
+	s := "end_turn"
+	return &s
 }
 
 func generateMessageID() string {

@@ -50,6 +50,7 @@ func main() {
 	serveCmd.Flags().CountP("verbose", "v", "Verbose output (-v for more info, -vv for debug)")
 	serveCmd.Flags().BoolP("quiet", "q", false, "Suppress all non-error output")
 	serveCmd.Flags().Bool("no-auto-update", false, "Disable automatic update check on startup")
+	serveCmd.Flags().Bool("no-save-port", false, "Do not persist the port to config (use with -p)")
 
 	// use command - switch the active model in Claude Code
 	useCmd := &cobra.Command{
@@ -150,7 +151,7 @@ Examples:
 		Long: `Manage provider configurations.
 
 Supports built-in presets for popular providers:
-  deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan, agnes
+  deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan, apifree, agnes, sensenova, nvidia
 
 Examples:
   api-switch provider list                          List all configured providers
@@ -180,6 +181,20 @@ Examples:
   api-switch provider test deepseek`,
 			RunE: runProviderTest,
 		},
+		&cobra.Command{
+			Use:     "known",
+			Aliases: []string{"presets"},
+			Short:   "List known (built-in) provider presets",
+			Long: `List all built-in provider presets that can be added with 'api-switch provider add'.
+
+These presets include pre-configured base URLs, provider types,
+default max tokens, and recommended models.
+
+Examples:
+  api-switch provider known
+  api-switch provider presets`,
+			RunE: runProviderKnown,
+		},
 	)
 
 	// provider add subcommand
@@ -187,7 +202,7 @@ Examples:
 		Use:   "add <name>",
 		Short: "Add a provider (supports built-in presets)",
 		Long: `Add a provider by name. If it matches a known provider preset
-(deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan),
+(deepseek, moonshot, qwen, glm, kimi, yi, step, ernie, hunyuan, apifree, agnes, sensenova, nvidia),
 the base URL and defaults are filled in automatically.
 
 You only need to provide the API key via --key flag.
@@ -389,10 +404,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	fmt.Println("  api-switch serve")
 	fmt.Println()
 	fmt.Println("其它命令：")
-	fmt.Println("  api-switch doctor          一键诊断")
-	fmt.Println("  api-switch test [model]    端到端测试")
-	fmt.Println("  api-switch monitor         实时流量监控")
-	fmt.Println("  api-switch --help          查看所有命令")
+	fmt.Println("  api-switch provider known    查看所有已知厂商")
+	fmt.Println("  api-switch doctor            一键诊断")
+	fmt.Println("  api-switch test [model]      端到端测试")
+	fmt.Println("  api-switch monitor           实时流量监控")
+	fmt.Println("  api-switch --help            查看所有命令")
 	fmt.Println()
 	return nil
 }
@@ -668,18 +684,48 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	p := port
-	if p == 0 {
-		p = cfg.Server.Port
+	portExplicitlySet := cmd.Flags().Changed("port")
+	if !portExplicitlySet {
+		p = 8080
+	}
+	noSavePort, _ := cmd.Flags().GetBool("no-save-port")
+
+	// Resolve config file path
+	configPath := cfgPath
+	if configPath == "" {
+		configPath = config.DefaultConfigPath()
+	}
+
+	// Persist port to config (unless --no-save-port)
+	if !noSavePort && p != cfg.Server.Port {
+		cfg.Server.Port = p
+		if err := config.Save(configPath, cfg); err != nil {
+			logutil.Warn("Failed to save port to config: %v", err)
+		}
+	}
+
+	// Sync Claude Code settings.json ANTHROPIC_BASE_URL to the current port
+	proxyURL := fmt.Sprintf("http://localhost:%d", p)
+	claudeSettingsPath := config.ClaudeSettingsPath()
+	claudeSettings, err := config.LoadClaudeSettings(claudeSettingsPath)
+	if err != nil {
+		logutil.Warn("Failed to load Claude settings: %v", err)
+	} else {
+		if claudeSettings.Env == nil {
+			claudeSettings.Env = make(map[string]string)
+		}
+		if claudeSettings.Env["ANTHROPIC_BASE_URL"] != proxyURL {
+			claudeSettings.Env["ANTHROPIC_BASE_URL"] = proxyURL
+			if err := config.SaveClaudeSettings(claudeSettingsPath, claudeSettings); err != nil {
+				logutil.Warn("Failed to sync Claude settings: %v", err)
+			}
+		}
 	}
 
 	srv := proxy.NewServer(cfg)
 	addr := fmt.Sprintf(":%d", p)
 	logutil.Info("Starting API-Switch proxy on %s", addr)
 	logutil.Info("Configured models: %d, providers: %d", len(cfg.Models), len(cfg.Providers))
-	configPath := cfgPath
-	if configPath == "" {
-		configPath = config.DefaultConfigPath()
-	}
 
 	// Auto-update check (runs in background, does not block startup)
 	noAutoUpdate, _ := cmd.Flags().GetBool("no-auto-update")
@@ -896,6 +942,33 @@ func runProviderList(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("%-20s %-12s %s (%s)\n", name, pcfg.Type, pcfg.BaseURL, keyStatus)
 	}
+	return nil
+}
+
+func runProviderKnown(cmd *cobra.Command, args []string) error {
+	known := config.KnownProviders()
+	if len(known) == 0 {
+		fmt.Println("No known provider presets available.")
+		return nil
+	}
+
+	// Sort provider names for consistent output
+	names := make([]string, 0, len(known))
+	for name := range known {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	fmt.Printf("%-12s %-8s %-12s %s\n", "NAME", "TYPE", "MAX TOKENS", "PRESET MODELS")
+	fmt.Println("--------------------------------------------------------------------------------")
+	for _, name := range names {
+		t := known[name]
+		models := strings.Join(t.Models, ", ")
+		fmt.Printf("%-12s %-8s %-12d %s\n", name, t.Type, t.DefaultMaxTokens, models)
+	}
+
+	fmt.Println()
+	fmt.Println("Use 'api-switch provider add <name> --key <your-key>' to configure one.")
 	return nil
 }
 

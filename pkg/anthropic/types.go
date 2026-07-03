@@ -101,8 +101,9 @@ type ContentBlockDeltaEvent struct {
 
 // DeltaBlock represents the delta in a content_block_delta event.
 type DeltaBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
 }
 
 // ContentBlockStopEvent represents a content_block_stop streaming event.

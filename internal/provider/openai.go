@@ -32,12 +32,15 @@ func NewOpenAIClient(cfg *config.ProviderConfig) *OpenAIClient {
 
 func openAIEndpoint(baseURL string) string {
 	baseURL = strings.TrimRight(baseURL, "/")
-	if strings.HasSuffix(baseURL, "/v1/chat/completions") {
+	// If the URL already ends with the expected path, use it as-is
+	if strings.HasSuffix(baseURL, "/chat/completions") {
 		return baseURL
 	}
+	// If it ends with /v1, append /chat/completions
 	if strings.HasSuffix(baseURL, "/v1") {
 		return baseURL + "/chat/completions"
 	}
+	// Otherwise append /v1/chat/completions
 	return baseURL + "/v1/chat/completions"
 }
 
@@ -46,7 +49,8 @@ func (c *OpenAIClient) newRequest(body io.Reader) (*http.Request, error) {
 }
 
 func (c *OpenAIClient) newRequestWithContext(ctx context.Context, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", openAIEndpoint(c.cfg.BaseURL), body)
+	endpoint := openAIEndpoint(c.cfg.BaseURL)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +108,7 @@ func (c *OpenAIClient) SendMessageWithContext(ctx context.Context, req *openai.C
 
 	var oaiResp openai.ChatCompletionResponse
 	if err := json.Unmarshal(rawBody, &oaiResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w\nraw body: %s", err, string(rawBody))
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	if len(oaiResp.Choices) == 0 {
 		log.Printf("WARNING: OpenAI response has 0 choices. Raw body: %s", truncateBody(string(rawBody), 500))
@@ -114,13 +118,21 @@ func (c *OpenAIClient) SendMessageWithContext(ctx context.Context, req *openai.C
 
 // StreamMessage sends a streaming request and returns the response body for reading SSE events.
 func (c *OpenAIClient) StreamMessage(req *openai.ChatCompletionRequest) (io.ReadCloser, error) {
-	req.Stream = true
-	body, err := json.Marshal(req)
+	return c.StreamMessageWithContext(context.Background(), req)
+}
+
+// StreamMessageWithContext sends a streaming request with context support.
+// It creates a copy of the request to avoid mutating the caller's struct.
+func (c *OpenAIClient) StreamMessageWithContext(ctx context.Context, req *openai.ChatCompletionRequest) (io.ReadCloser, error) {
+	// Create a copy to avoid mutating the caller's struct
+	reqCopy := *req
+	reqCopy.Stream = true
+	body, err := json.Marshal(&reqCopy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := c.newRequest(bytes.NewReader(body))
+	httpReq, err := c.newRequestWithContext(ctx, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

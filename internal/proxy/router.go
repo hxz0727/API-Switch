@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/hxz0727/API-Switch/internal/config"
@@ -40,7 +41,8 @@ func (r *Router) Reload(cfg *config.Config) {
 }
 
 func (r *Router) initClients() {
-	for name, provCfg := range r.cfg.Providers {
+	for name := range r.cfg.Providers {
+		provCfg := r.cfg.Providers[name]
 		entry := clientEntry{}
 		switch provCfg.Type {
 		case "anthropic":
@@ -74,7 +76,7 @@ func (r *Router) Route(model string) (*RouteResult, error) {
 
 	entry, ok := r.clients[providerName]
 	if !ok {
-		return nil, err
+		return nil, fmt.Errorf("provider %q is configured but client was not initialized (unsupported type %q)", providerName, provCfg.Type)
 	}
 
 	result := &RouteResult{

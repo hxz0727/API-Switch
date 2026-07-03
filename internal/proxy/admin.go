@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,25 @@ import (
 	"github.com/hxz0727/API-Switch/internal/logutil"
 	"github.com/hxz0727/API-Switch/internal/monitor"
 )
+
+// requireLocalhost wraps a handler to reject non-localhost requests.
+func requireLocalhost(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "admin endpoints are only accessible from localhost",
+			})
+			return
+		}
+		next(w, r)
+	}
+}
 
 func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -339,5 +339,17 @@ func KnownProviders() map[string]ProviderTemplate {
 			DefaultMaxTokens: 8192,
 			Models: []string{"agnes-1.5-flash", "agnes-2.0-flash"},
 		},
+		"sensenova": {
+			Type:    "openai",
+			BaseURL: "https://token.sensenova.cn/v1",
+			DefaultMaxTokens: 8192,
+			Models: []string{"sensenova-6.7-flash-lite", "deepseek-v4-flash"},
+		},
+		"nvidia": {
+			Type:    "openai",
+			BaseURL: "https://integrate.api.nvidia.com/v1",
+			DefaultMaxTokens: 4096,
+			Models: []string{"mimimax-m3", "step-3.7-flash", "kimi-k2.6", "glm-5.1"},
+		},
 	}
 }

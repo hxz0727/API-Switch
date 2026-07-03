@@ -94,6 +94,7 @@ type ChunkChoice struct {
 type Delta struct {
 	Role      string          `json:"role,omitempty"`
 	Content   string          `json:"content,omitempty"`
+	Reasoning string          `json:"reasoning,omitempty"`
 	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
 }
 

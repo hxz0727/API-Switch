@@ -1,0 +1,142 @@
+server:
+  port: 9000
+
+# ============================================================
+# 模型路由配置
+# ============================================================
+models:
+  # DeepSeek
+  deepseek-chat:
+    provider: deepseek
+  deepseek-coder:
+    provider: deepseek
+
+  # Qwen (通义千问)
+  qwen-plus:
+    provider: qwen
+  qwen-max:
+    provider: qwen
+  qwen-turbo:
+    provider: qwen
+
+  # GLM (智谱)
+  glm-4-flash:
+    provider: glm
+  glm-4-plus:
+    provider: glm
+
+  # Kimi
+  kimi-latest:
+    provider: kimi
+
+  # Hunyuan (混元)
+  hunyuan-lite:
+    provider: hunyuan
+  hunyuan-standard:
+    provider: hunyuan
+
+  # API Free
+  skywork-ai/skyclaw-v1:
+    provider: apifree
+
+  # Agnes
+  agnes-1.5-flash:
+    provider: agnes
+  agnes-2.0-flash:
+    provider: agnes
+
+  # SenseNova (商汤 商量)
+  sensenova-6.7-flash-lite:
+    provider: sensenova
+  deepseek-v4-flash:
+    provider: sensenova
+
+  # NVIDIA (英伟达)
+  mimimax-m3:
+    provider: nvidia
+  step-3.7-flash:
+    provider: nvidia
+  kimi-k2.6:
+    provider: nvidia
+  glm-5.1:
+    provider: nvidia
+
+  # 小米 (Mimo)
+  mimo-v2.5:
+    provider: xiaomi
+  mimo-v2.5-pro:
+    provider: xiaomi
+
+# ============================================================
+# 供应商配置
+# ============================================================
+providers:
+  # DeepSeek
+  deepseek:
+    type: openai
+    api_key: "<your-deepseek-api-key>"
+    base_url: https://api.deepseek.com
+    default_max_tokens: 8192
+
+  # Qwen (通义千问)
+  qwen:
+    type: openai
+    api_key: "<your-qwen-api-key>"
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    default_max_tokens: 8192
+
+  # GLM (智谱)
+  glm:
+    type: openai
+    api_key: "<your-glm-api-key>"
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    default_max_tokens: 4096
+
+  # Kimi
+  kimi:
+    type: openai
+    api_key: "<your-kimi-api-key>"
+    base_url: https://api.moonshot.cn/v1
+    default_max_tokens: 4096
+
+  # Hunyuan (混元)
+  hunyuan:
+    type: openai
+    api_key: "<your-hunyuan-api-key>"
+    base_url: https://api.hunyuan.cloud.tencent.com/v1
+    default_max_tokens: 4096
+
+  # API Free
+  apifree:
+    type: openai
+    api_key: "<your-apifree-api-key>"
+    base_url: https://api.apifree.ai/agent/v1
+    default_max_tokens: 4096
+
+  # Agnes
+  agnes:
+    type: openai
+    api_key: "<your-agnes-api-key>"
+    base_url: https://apihub.agnes-ai.com/v1
+    default_max_tokens: 8192
+
+  # SenseNova (商汤 商量)
+  sensenova:
+    type: openai
+    api_key: "<your-sensenova-api-key>"
+    base_url: https://token.sensenova.cn/v1
+    default_max_tokens: 8192
+
+  # NVIDIA (英伟达)
+  nvidia:
+    type: openai
+    api_key: "<your-nvidia-api-key>"
+    base_url: https://integrate.api.nvidia.com/v1
+    default_max_tokens: 4096
+
+  # 小米 (Mimo, Anthropic 协议)
+  xiaomi:
+    type: anthropic
+    api_key: "<your-xiaomi-api-key>"
+    base_url: https://token-plan-cn.xiaomimimo.com/anthropic
+    default_max_tokens: 4096

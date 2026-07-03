@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/hxz0727/API-Switch/pkg/anthropic"
@@ -151,19 +152,19 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 			// Extract tool_use_id from content blocks
 			var blocks []anthropic.ContentBlock
 			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
+				var contentParts []string
 				for _, b := range blocks {
-					if b.ToolUseID != "" {
+					if b.ToolUseID != "" && oaiMsg.ToolCallID == "" {
 						oaiMsg.ToolCallID = b.ToolUseID
 					}
-					if b.Type == "text" || b.Content != nil {
-						if oaiMsg.Content == "" {
-							if b.Text != "" {
-								oaiMsg.Content = b.Text
-							} else if b.Content != nil {
-								oaiMsg.Content = contentToString(b.Content)
-							}
-						}
+					if b.Type == "text" && b.Text != "" {
+						contentParts = append(contentParts, b.Text)
+					} else if b.Content != nil {
+						contentParts = append(contentParts, contentToString(b.Content))
 					}
+				}
+				if oaiMsg.Content == "" {
+					oaiMsg.Content = strings.Join(contentParts, "\n")
 				}
 			}
 			if oaiMsg.Content == "" {
@@ -174,10 +175,25 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 		messages = append(messages, oaiMsg)
 	}
 
-	// max_tokens
+	// Strip orphaned tool_calls from assistant messages that lack a following
+	// tool-role message. Some providers (DeepSeek) reject requests where assistant
+	// tool_calls are not immediately followed by paired tool results.
+	for i := 0; i < len(messages); i++ {
+		if messages[i].Role == "assistant" && len(messages[i].ToolCalls) > 0 {
+			// Check if the very next message is a tool-role response
+			if i+1 >= len(messages) || messages[i+1].Role != "tool" {
+				messages[i].ToolCalls = nil
+			}
+		}
+	}
+
+	// max_tokens — ensure at least 1 to avoid "unlimited" generation
 	maxTokens := antReq.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = defaultMaxTokens
+	}
+	if maxTokens == 0 {
+		maxTokens = 1024
 	}
 
 	req := &openai.ChatCompletionRequest{
@@ -217,26 +233,36 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 			Type string `json:"type"`
 			Name string `json:"name,omitempty"`
 		}
-		if err := json.Unmarshal(antReq.ToolChoice, &choice); err == nil && choice.Type != "" {
-			switch choice.Type {
-			case "auto":
+		if err := json.Unmarshal(antReq.ToolChoice, &choice); err == nil {
+			if choice.Type == "" {
+				// Malformed tool_choice (valid JSON but no type) — default to "auto"
 				req.ToolChoice = "auto"
-			case "any":
-				req.ToolChoice = "required"
-			case "tool":
-				if choice.Name != "" {
-					req.ToolChoice = map[string]interface{}{
-						"type": "function",
-						"function": map[string]string{
-							"name": choice.Name,
-						},
-					}
-				} else {
+				log.Printf("WARNING: tool_choice has empty type field, defaulting to auto")
+			} else {
+				switch choice.Type {
+				case "auto":
+					req.ToolChoice = "auto"
+				case "any":
 					req.ToolChoice = "required"
+				case "tool":
+					if choice.Name != "" {
+						req.ToolChoice = map[string]interface{}{
+							"type": "function",
+							"function": map[string]string{
+								"name": choice.Name,
+							},
+						}
+					} else {
+						req.ToolChoice = "auto"
+					}
+				default:
+					req.ToolChoice = "auto"
 				}
-			default:
-				req.ToolChoice = "auto"
 			}
+		} else {
+			// Malformed tool_choice JSON — default to "auto"
+			req.ToolChoice = "auto"
+			log.Printf("WARNING: failed to parse tool_choice: %v", err)
 		}
 	}
 
