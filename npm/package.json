@@ -1,7 +1,7 @@
 {
   "name": "api-switch-cc",
-  "version": "0.5.0",
-  "description": "Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen、GLM、Moonshot 等国产大模型，协议自动转换，零配置即用。LLM API proxy for Claude Code with DeepSeek, Qwen, Anthropic, OpenAI support.",
+  "version": "0.8.0",
+  "description": "Claude Code 多模型代理 — 一键切换 DeepSeek、Qwen、GLM、商汤商量、NVIDIA 等国产大模型，协议自动转换，零配置即用。LLM API proxy for Claude Code with DeepSeek, Qwen, SenseNova, NVIDIA support.",
   "bin": {
     "api-switch": "api-switch.js"
   },
@@ -20,12 +20,17 @@
     "glm",
     "openai",
     "anthropic",
+    "sensenova",
+    "nvidia",
     "api-gateway",
     "ai-proxy",
     "国产大模型",
     "通义千问",
     "智谱",
     "月之暗面",
+    "商汤",
+    "商量",
+    "英伟达",
     "deep-seek"
   ],
   "license": "MIT",
