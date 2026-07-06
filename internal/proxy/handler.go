@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,12 +60,50 @@ func NewServer(cfg *config.Config) *Server {
 	return s
 }
 
+// authMiddleware checks for valid Bearer token if auth is configured.
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth if no token configured
+		if s.cfg.Server.AuthToken == "" {
+			next(w, r)
+			return
+		}
+
+		// Check Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error",
+				"Missing Authorization header. Use: Authorization: Bearer <token>")
+			return
+		}
+
+		// Parse Bearer token
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error",
+				"Invalid Authorization header format. Use: Bearer <token>")
+			return
+		}
+
+		token := parts[1]
+		if token != s.cfg.Server.AuthToken {
+			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error",
+				"Invalid authentication token")
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 // StartWithConfigFile starts the HTTP server with config file path for hot-reload.
 func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 	s.cfgPath = cfgPath
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/messages", s.handleMessages)
+	// Apply auth and rate limit middleware to the main API endpoint
+	handler := s.rateLimitMiddleware(s.authMiddleware(s.handleMessages))
+	mux.HandleFunc("/v1/messages", handler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		numModels := len(s.cfg.Models)
@@ -95,6 +134,13 @@ func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 		Addr:    addr,
 		Handler: mux,
 	}
+
+	// Check if TLS is configured
+	if s.cfg.Server.TLSCert != "" && s.cfg.Server.TLSKey != "" {
+		logutil.Info("TLS enabled: cert=%s, key=%s", s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
+		return s.httpServer.ListenAndServeTLS(s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
+	}
+
 	return s.httpServer.ListenAndServe()
 }
 
@@ -335,7 +381,11 @@ func (s *Server) handleOpenAI(ctx context.Context, w http.ResponseWriter, antReq
 
 	// Debug: log what was converted
 	for i, msg := range oaiReq.Messages {
-		logutil.Debug("DEBUG OAI msg[%d]: role=%q content=%q", i, msg.Role, msg.Content[:min(len(msg.Content), 200)])
+		contentStr := oaiContentToString(msg.Content)
+		if len(contentStr) > 200 {
+			contentStr = contentStr[:200]
+		}
+		logutil.Debug("DEBUG OAI msg[%d]: role=%q content=%q", i, msg.Role, contentStr)
 	}
 
 	if antReq.Stream {
@@ -399,9 +449,31 @@ func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWrite
 func estimateInputTokens(req *openai.ChatCompletionRequest) int {
 	tokens := 0
 	for _, msg := range req.Messages {
-		tokens += len(msg.Content) / 4 // rough: ~4 chars per token
+		contentStr := oaiContentToString(msg.Content)
+		tokens += len(contentStr) / 4 // rough: ~4 chars per token
 	}
 	return tokens
+}
+
+// oaiContentToString extracts a string from OpenAI message content (string or []ContentPart).
+func oaiContentToString(content interface{}) string {
+	if content == nil {
+		return ""
+	}
+	switch v := content.(type) {
+	case string:
+		return v
+	case []openai.ContentPart:
+		var texts []string
+		for _, part := range v {
+			if part.Type == "text" {
+				texts = append(texts, part.Text)
+			}
+		}
+		return strings.Join(texts, "\n")
+	default:
+		return fmt.Sprintf("%v", content)
+	}
 }
 
 // writeAnthropicError writes an Anthropic-format error response.

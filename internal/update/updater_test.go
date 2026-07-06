@@ -1,6 +1,8 @@
 package update
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -510,10 +512,10 @@ func TestCopyFile_DestinationNotWritable(t *testing.T) {
 }
 
 // ============================================================================
-// Unit Tests — downloadAndReplace (with mock server)
+// Unit Tests — downloadVerifyAndReplace (with mock server)
 // ============================================================================
 
-func TestDownloadAndReplace_Success(t *testing.T) {
+func TestDownloadVerifyAndReplace_Success(t *testing.T) {
 	binaryContent := []byte("#!/bin/sh\necho 'fake binary'\n")
 	srv := fakeDownloadServer(t, binaryContent)
 	defer srv.Close()
@@ -522,7 +524,11 @@ func TestDownloadAndReplace_Success(t *testing.T) {
 	target := filepath.Join(tmpDir, "test-binary")
 	os.WriteFile(target, []byte("old content"), 0755)
 
-	err := downloadAndReplace(srv.URL, target)
+	// Calculate expected hash
+	hash := sha256.Sum256(binaryContent)
+	expectedHash := hex.EncodeToString(hash[:])
+
+	err := downloadVerifyAndReplace(srv.URL, target, expectedHash)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -541,40 +547,65 @@ func TestDownloadAndReplace_Success(t *testing.T) {
 	}
 }
 
-func TestDownloadAndReplace_InvalidURL(t *testing.T) {
+func TestDownloadVerifyAndReplace_InvalidURL(t *testing.T) {
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "test-binary")
 
-	err := downloadAndReplace("http://invalid.url/test", target)
+	err := downloadVerifyAndReplace("http://invalid.url/test", target, "abc123")
 	if err == nil {
 		t.Error("expected error for invalid download URL")
 		os.Remove(target)
 	}
 }
 
-func TestDownloadAndReplace_ServerError(t *testing.T) {
+func TestDownloadVerifyAndReplace_ServerError(t *testing.T) {
 	srv := fakeReleaseServer(t, "v0.5.0", http.StatusNotFound)
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "test-binary")
 
-	err := downloadAndReplace(srv.URL, target)
+	err := downloadVerifyAndReplace(srv.URL, target, "abc123")
 	if err == nil {
 		t.Error("expected error for 404 response")
 	}
 }
 
-func TestDownloadAndReplace_Server500(t *testing.T) {
+func TestDownloadVerifyAndReplace_Server500(t *testing.T) {
 	srv := fakeReleaseServer(t, "v0.5.0", http.StatusInternalServerError)
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "test-binary")
 
-	err := downloadAndReplace(srv.URL, target)
+	err := downloadVerifyAndReplace(srv.URL, target, "abc123")
 	if err == nil {
 		t.Error("expected error for 500 response")
+	}
+}
+
+func TestDownloadVerifyAndReplace_ChecksumMismatch(t *testing.T) {
+	binaryContent := []byte("#!/bin/sh\necho 'fake binary'\n")
+	srv := fakeDownloadServer(t, binaryContent)
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "test-binary")
+	os.WriteFile(target, []byte("old content"), 0755)
+
+	// Wrong hash
+	err := downloadVerifyAndReplace(srv.URL, target, "wronghash")
+	if err == nil {
+		t.Error("expected error for checksum mismatch")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Errorf("expected checksum mismatch error, got: %v", err)
+	}
+
+	// Original file should be unchanged
+	readBack, _ := os.ReadFile(target)
+	if string(readBack) != "old content" {
+		t.Error("file should not have been modified on checksum failure")
 	}
 }
 
@@ -607,7 +638,24 @@ func TestDoUpdate_BothURLsFail(t *testing.T) {
 
 func TestDoUpdate_Success(t *testing.T) {
 	binaryContent := []byte("new binary content v0.5.0")
-	srv := fakeDownloadServer(t, binaryContent)
+
+	// Calculate SHA256 hash
+	hash := sha256.Sum256(binaryContent)
+	expectedHash := hex.EncodeToString(hash[:])
+
+	// Create a mock server that serves both binary and checksums
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+			// Serve checksums
+			binaryName := "api-switch-linux-amd64"
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte(fmt.Sprintf("%s  %s\n", expectedHash, binaryName)))
+		} else {
+			// Serve binary
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(binaryContent)
+		}
+	}))
 	defer srv.Close()
 
 	tmpDir := t.TempDir()
@@ -615,11 +663,6 @@ func TestDoUpdate_Success(t *testing.T) {
 
 	oldGH := GitHubDownloadBase
 	oldGitee := GiteeRawBase
-	// DoUpdate constructs: base + "/" + version + "/api-switch-" + platform
-	// We set the base to just the server URL, and the path will be wrong
-	// but the first attempt will fail and fall to gitee which we set to same URL
-	// Actually we need to match the URL pattern. Let's just test the download succeeds
-	// by setting base to empty and using the raw server URL
 	GitHubDownloadBase = srv.URL + "/dummy-path" // will fail
 	GiteeRawBase = srv.URL                       // will succeed
 	defer func() {
@@ -861,7 +904,7 @@ func TestFetchLatestVersion_LargeResponse(t *testing.T) {
 	_ = ver
 }
 
-func TestDownloadAndReplace_ReadOnlyTargetDir(t *testing.T) {
+func TestDownloadVerifyAndReplace_ReadOnlyTargetDir(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test when running as root")
 	}
@@ -876,7 +919,7 @@ func TestDownloadAndReplace_ReadOnlyTargetDir(t *testing.T) {
 	srv := fakeDownloadServer(t, []byte("content"))
 	defer srv.Close()
 
-	err := downloadAndReplace(srv.URL, target)
+	err := downloadVerifyAndReplace(srv.URL, target, "abc123")
 	if err == nil {
 		t.Error("expected error when target directory is read-only")
 	}

@@ -29,11 +29,24 @@ type FunctionDef struct {
 
 // Message represents a single message in the conversation.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role       string          `json:"role"`
+	Content    interface{}     `json:"content"` // string or []ContentPart for multimodal
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+	Name       string          `json:"name,omitempty"`
+}
+
+// ContentPart represents a part of multimodal content.
+type ContentPart struct {
+	Type     string    `json:"type"` // "text" or "image_url"
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// ImageURL represents an image URL in multimodal content.
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"` // "auto", "low", "high"
 }
 
 // ToolCall represents a tool call in an assistant message.

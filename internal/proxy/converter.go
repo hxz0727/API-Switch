@@ -124,21 +124,46 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 				oaiMsg.ToolCalls = toolCalls
 			}
 		} else if msg.Role == "user" && hasContentBeyondText(msg.Content) {
-			// For user messages with images, convert content blocks.
-			// NOTE: Images are converted to text placeholders — actual image data is not
-			// passed to the upstream API. This is a known limitation. Full multi-modal
-			// conversion (Anthropic image blocks -> OpenAI vision format) is not yet implemented.
+			// For user messages with images, convert content blocks to OpenAI multimodal format.
 			var blocks []anthropic.ContentBlock
 			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-				var parts []string
+				var contentParts []openai.ContentPart
 				for _, b := range blocks {
-					if b.Type == "text" {
-						parts = append(parts, b.Text)
-					} else if b.Type == "image" && b.Source != nil {
-						parts = append(parts, fmt.Sprintf("[Image: %s (base64 data)]", b.Source.MediaType))
+					switch b.Type {
+					case "text":
+						contentParts = append(contentParts, openai.ContentPart{
+							Type: "text",
+							Text: b.Text,
+						})
+					case "image":
+						if b.Source != nil {
+							// Build the image URL
+							// Anthropic format: {"type": "base64", "media_type": "image/png", "data": "..."}
+							// OpenAI format: {"url": "data:image/png;base64,..."} or direct URL
+							var imageURL string
+							if b.Source.Type == "base64" && b.Source.Data != "" {
+								// Convert base64 data to data URL
+								imageURL = fmt.Sprintf("data:%s;base64,%s", b.Source.MediaType, b.Source.Data)
+							} else if b.Source.Type == "url" && b.Source.URL != "" {
+								// Direct URL
+								imageURL = b.Source.URL
+							}
+							if imageURL != "" {
+								contentParts = append(contentParts, openai.ContentPart{
+									Type: "image_url",
+									ImageURL: &openai.ImageURL{
+										URL: imageURL,
+									},
+								})
+							}
+						}
 					}
 				}
-				oaiMsg.Content = strings.Join(parts, "\n")
+				if len(contentParts) > 0 {
+					oaiMsg.Content = contentParts
+				} else {
+					oaiMsg.Content = contentToString(msg.Content)
+				}
 			} else {
 				oaiMsg.Content = contentToString(msg.Content)
 			}

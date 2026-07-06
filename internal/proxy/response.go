@@ -28,10 +28,21 @@ func ConvertOpenAIToAnthropic(oaiResp *openai.ChatCompletionResponse, requestedM
 	var content []anthropic.ContentBlock
 
 	// Add text content if present
-	if choice.Message.Content != "" {
+	contentStr := ""
+	switch v := choice.Message.Content.(type) {
+	case string:
+		contentStr = v
+	case []openai.ContentPart:
+		for _, part := range v {
+			if part.Type == "text" {
+				contentStr += part.Text
+			}
+		}
+	}
+	if contentStr != "" {
 		content = append(content, anthropic.ContentBlock{
 			Type: "text",
-			Text: choice.Message.Content,
+			Text: contentStr,
 		})
 	}
 

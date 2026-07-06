@@ -59,9 +59,10 @@ type ContentBlock struct {
 
 // ImageSource represents an image source in a content block.
 type ImageSource struct {
-	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+	Type      string `json:"type"`       // "base64" or "url"
+	MediaType string `json:"media_type"` // e.g., "image/png"
+	Data      string `json:"data"`       // base64 data (for type="base64")
+	URL       string `json:"url"`        // image URL (for type="url")
 }
 
 // ResponseUsage represents token usage in the response.

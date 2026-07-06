@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/hxz0727/API-Switch/pkg/anthropic"
+	"github.com/hxz0727/API-Switch/pkg/openai"
 )
 
 // --- contentToString tests ---
@@ -277,14 +278,15 @@ func TestConvertAnthropicToOpenAI_AssistantWithToolUse(t *testing.T) {
 		Messages: []anthropic.Message{
 			{Role: "user", Content: json.RawMessage(`"what is the weather in Beijing?"`)},
 			{Role: "assistant", Content: json.RawMessage(`[{"type":"tool_use","id":"toolu_001","name":"get_weather","input":{"city":"Beijing"}}]`)},
+			{Role: "tool_result", Content: json.RawMessage(`[{"tool_use_id":"toolu_001","type":"text","text":"25°C"}]`)},
 		},
 		MaxTokens: 100,
 	}
 
 	result := ConvertAnthropicToOpenAI(antReq, "gpt-4o", 4096)
 
-	if len(result.Messages) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result.Messages))
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result.Messages))
 	}
 	assistantMsg := result.Messages[1]
 	if assistantMsg.Role != "assistant" {
@@ -320,12 +322,18 @@ func TestConvertAnthropicToOpenAI_ToolResult(t *testing.T) {
 	if toolMsg.ToolCallID != "toolu_001" {
 		t.Errorf("expected tool_call_id 'toolu_001', got %q", toolMsg.ToolCallID)
 	}
-	if toolMsg.Content != "25°C" {
-		t.Errorf("expected content '25°C', got %q", toolMsg.Content)
+	// Content is now []ContentPart, check the string representation
+	contentStr := ""
+	switch v := toolMsg.Content.(type) {
+	case string:
+		contentStr = v
+	}
+	if contentStr != "25°C" {
+		t.Errorf("expected content '25°C', got %q", contentStr)
 	}
 }
 
-func TestConvertAnthropicToOpenAI_ImagePlaceholder(t *testing.T) {
+func TestConvertAnthropicToOpenAI_ImageConversion(t *testing.T) {
 	antReq := &anthropic.MessagesRequest{
 		Model: "claude-3-opus",
 		Messages: []anthropic.Message{
@@ -340,8 +348,24 @@ func TestConvertAnthropicToOpenAI_ImagePlaceholder(t *testing.T) {
 		t.Fatalf("expected 1 message, got %d", len(result.Messages))
 	}
 	content := result.Messages[0].Content
-	if content != "describe this\n[Image: image/png (base64 data)]" {
-		t.Errorf("unexpected content: %q", content)
+	// Content should be []ContentPart with text and image_url
+	parts, ok := content.([]openai.ContentPart)
+	if !ok {
+		t.Fatalf("expected []ContentPart, got %T", content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 content parts, got %d", len(parts))
+	}
+	if parts[0].Type != "text" || parts[0].Text != "describe this" {
+		t.Errorf("unexpected first part: %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" {
+		t.Errorf("expected image_url type, got %q", parts[1].Type)
+	}
+	if parts[1].ImageURL == nil {
+		t.Error("expected ImageURL to be set")
+	} else if parts[1].ImageURL.URL != "data:image/png;base64,abc123" {
+		t.Errorf("unexpected image URL: %q", parts[1].ImageURL.URL)
 	}
 }
 

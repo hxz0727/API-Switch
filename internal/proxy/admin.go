@@ -15,13 +15,12 @@ import (
 )
 
 // requireLocalhost wraps a handler to reject non-localhost requests.
+// It checks both the direct connection IP and proxy headers (X-Forwarded-For, X-Real-IP).
+// If an admin token is configured, it also validates the Authorization header.
 func requireLocalhost(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			host = r.RemoteAddr
-		}
-		if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+		// First, check if there's a proxy header that might indicate a non-localhost source
+		if !isLocalhostRequest(r) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			json.NewEncoder(w).Encode(map[string]string{
@@ -30,6 +29,58 @@ func requireLocalhost(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		next(w, r)
+	}
+}
+
+// isLocalhostRequest checks if the request originates from localhost.
+// It examines both the direct RemoteAddr and common proxy headers.
+func isLocalhostRequest(r *http.Request) bool {
+	// Check X-Forwarded-For header (may contain multiple IPs, leftmost is original client)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Take the first (leftmost) IP, which is the original client
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			clientIP := strings.TrimSpace(ips[0])
+			if !isLocalhostIP(clientIP) {
+				return false
+			}
+		}
+	}
+
+	// Check X-Real-IP header (used by some proxies)
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		if !isLocalhostIP(strings.TrimSpace(xri)) {
+			return false
+		}
+	}
+
+	// Check the direct RemoteAddr
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+
+	return isLocalhostIP(host)
+}
+
+// isLocalhostIP checks if an IP address is localhost.
+func isLocalhostIP(ip string) bool {
+	// Handle IPv6 bracket notation
+	ip = strings.TrimPrefix(ip, "[")
+
+	switch ip {
+	case "127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1":
+		return true
+	default:
+		// Check if it's a loopback address (127.x.x.x)
+		if strings.HasPrefix(ip, "127.") {
+			return true
+		}
+		// Check IPv6 loopback (::1/128)
+		if strings.HasPrefix(ip, "::1") {
+			return true
+		}
+		return false
 	}
 }
 

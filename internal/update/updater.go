@@ -1,6 +1,8 @@
 package update
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -196,39 +198,7 @@ func isNewer(v1, v2 string) bool {
 	return false
 }
 
-// DoUpdate performs the actual self-update.
-// It downloads the latest binary and replaces the current one.
-func DoUpdate(currentBinary string, latestVersion string) error {
-	// Determine platform
-	plat := platformKey()
-	if plat == "" {
-		return fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-
-	// Try Gitee first, then GitHub
-	urls := []string{
-		fmt.Sprintf("%s/%s/api-switch-%s", GiteeRawBase, latestVersion, plat),
-		fmt.Sprintf("%s/%s/api-switch-%s", GitHubDownloadBase, latestVersion, plat),
-	}
-
-	if runtime.GOOS == "windows" {
-		urls[0] = fmt.Sprintf("%s/%s/api-switch-windows-amd64.exe", GiteeRawBase, latestVersion)
-		urls[1] = fmt.Sprintf("%s/%s/api-switch-windows-amd64.exe", GitHubDownloadBase, latestVersion)
-	}
-
-	var downloadErr error
-	for _, url := range urls {
-		if err := downloadAndReplace(url, currentBinary); err == nil {
-			logutil.Info("Auto-update successful: %s", latestVersion)
-			return nil
-		} else {
-			downloadErr = err
-		}
-	}
-
-	return fmt.Errorf("failed to download update: %w", downloadErr)
-}
-
+// platformKey returns the platform key for the current OS/architecture.
 func platformKey() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -248,7 +218,106 @@ func platformKey() string {
 	}
 }
 
-func downloadAndReplace(url, targetPath string) error {
+// DoUpdate performs the actual self-update.
+// It downloads the latest binary, verifies SHA256 checksum, and replaces the current one.
+func DoUpdate(currentBinary string, latestVersion string) error {
+	// Determine platform
+	plat := platformKey()
+	if plat == "" {
+		return fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	// Determine binary filename
+	binaryName := fmt.Sprintf("api-switch-%s", plat)
+	if runtime.GOOS == "windows" {
+		binaryName = "api-switch-windows-amd64.exe"
+	}
+
+	// Try Gitee first, then GitHub
+	sources := []struct {
+		binaryURL    string
+		checksumURL  string
+		sourceName   string
+	}{
+		{
+			binaryURL:   fmt.Sprintf("%s/%s/%s", GiteeRawBase, latestVersion, binaryName),
+			checksumURL: fmt.Sprintf("%s/%s/checksums.txt", GiteeRawBase, latestVersion),
+			sourceName:  "Gitee",
+		},
+		{
+			binaryURL:   fmt.Sprintf("%s/%s/%s", GitHubDownloadBase, latestVersion, binaryName),
+			checksumURL: fmt.Sprintf("%s/%s/checksums.txt", GitHubDownloadBase, latestVersion),
+			sourceName:  "GitHub",
+		},
+	}
+
+	var lastErr error
+	for _, src := range sources {
+		logutil.Debug("Auto-update: trying %s", src.sourceName)
+
+		// Download checksums first
+		expectedHash, err := fetchChecksum(src.checksumURL, binaryName)
+		if err != nil {
+			logutil.Debug("Auto-update: failed to fetch checksum from %s: %v", src.sourceName, err)
+			lastErr = err
+			continue
+		}
+
+		// Download and verify binary
+		if err := downloadVerifyAndReplace(src.binaryURL, currentBinary, expectedHash); err != nil {
+			logutil.Debug("Auto-update: %s failed: %v", src.sourceName, err)
+			lastErr = err
+			continue
+		}
+
+		logutil.Info("Auto-update successful: %s (verified SHA256)", latestVersion)
+		return nil
+	}
+
+	return fmt.Errorf("failed to download update from all sources: %w", lastErr)
+}
+
+// fetchChecksum downloads and parses the checksums.txt file.
+// Returns the expected SHA256 hash for the given filename.
+func fetchChecksum(checksumURL, filename string) (string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(checksumURL)
+	if err != nil {
+		return "", fmt.Errorf("cannot fetch checksums: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("checksums returned status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return "", fmt.Errorf("cannot read checksums: %w", err)
+	}
+
+	// Parse checksums.txt format: "hash  filename" or "hash filename"
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			hash := parts[0]
+			name := parts[len(parts)-1] // Last field is filename
+			if name == filename {
+				return hash, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("checksum for %s not found in checksums.txt", filename)
+}
+
+// downloadVerifyAndReplace downloads a binary, verifies its SHA256 hash, and replaces the current binary.
+func downloadVerifyAndReplace(url, targetPath, expectedHash string) error {
 	logutil.Debug("Auto-update: downloading %s", url)
 
 	// Ensure parent directory exists
@@ -274,12 +343,24 @@ func downloadAndReplace(url, targetPath string) error {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	// Calculate SHA256 while downloading
+	hasher := sha256.New()
+	multiWriter := io.MultiWriter(f, hasher)
+
+	if _, err := io.Copy(multiWriter, resp.Body); err != nil {
 		f.Close()
 		os.Remove(tmpFile)
 		return fmt.Errorf("download incomplete: %w", err)
 	}
 	f.Close()
+
+	// Verify SHA256
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if actualHash != expectedHash {
+		os.Remove(tmpFile)
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+	}
+	logutil.Debug("Auto-update: SHA256 verified (%s)", actualHash[:16]+"...")
 
 	// Replace current binary atomically
 	if err := os.Rename(tmpFile, targetPath); err != nil {

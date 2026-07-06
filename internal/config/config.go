@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hxz0727/API-Switch/internal/secrets"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,7 +20,11 @@ type Config struct {
 
 // ServerConfig represents server configuration.
 type ServerConfig struct {
-	Port int `yaml:"port"`
+	Port       int    `yaml:"port"`
+	AuthToken  string `yaml:"auth_token,omitempty"`  // Optional Bearer token for API authentication
+	RateLimit  int    `yaml:"rate_limit,omitempty"`  // Max requests per minute per IP (0 = disabled)
+	TLSCert    string `yaml:"tls_cert,omitempty"`    // Path to TLS certificate file
+	TLSKey     string `yaml:"tls_key,omitempty"`     // Path to TLS key file
 }
 
 // ModelConfig defines which provider a model uses and optional model name override.
@@ -61,6 +66,7 @@ func DefaultConfigPath() string {
 
 // Load reads the config file from the given path.
 // If the file does not exist, returns default config.
+// API keys are automatically decrypted if encrypted.
 func Load(path string) (*Config, error) {
 	if path == "" {
 		path = DefaultConfigPath()
@@ -79,16 +85,46 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Decrypt API keys
+	for name, prov := range cfg.Providers {
+		if prov.APIKey != "" {
+			decrypted, err := secrets.DecryptString(prov.APIKey)
+			if err != nil {
+				// Log warning but continue - might be plain text for backward compatibility
+				// The key will remain as-is and will be re-encrypted on save
+			} else {
+				prov.APIKey = decrypted
+				cfg.Providers[name] = prov
+			}
+		}
+	}
+
 	return cfg, nil
 }
 
 // Save writes the config to the given path.
+// API keys are automatically encrypted before saving.
 func Save(path string, cfg *Config) error {
 	if path == "" {
 		path = DefaultConfigPath()
 	}
 
-	data, err := yaml.Marshal(cfg)
+	// Create a copy to encrypt API keys without modifying the original
+	cfgCopy := *cfg
+	cfgCopy.Providers = make(map[string]ProviderConfig)
+	for name, prov := range cfg.Providers {
+		provCopy := prov
+		if prov.APIKey != "" && !secrets.IsEncrypted(prov.APIKey) {
+			encrypted, err := secrets.EncryptString(prov.APIKey)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt API key for %s: %w", name, err)
+			}
+			provCopy.APIKey = encrypted
+		}
+		cfgCopy.Providers[name] = provCopy
+	}
+
+	data, err := yaml.Marshal(&cfgCopy)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
