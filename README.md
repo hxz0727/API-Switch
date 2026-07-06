@@ -18,9 +18,10 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 
 - **零配置切换模型** — `api-switch use <model>` 即刻切换，Claude Code 热加载
 - **多提供商支持** — Anthropic、OpenAI、DeepSeek、Qwen、Moonshot、Agnes AI 等任意 OpenAI 兼容 API
-- **协议自动转换** — Anthropic ↔ OpenAI 双向转换，含流式 SSE、工具调用、图片
-- **Provider 模板** — 内置 11 个厂商预设（含 Agnes AI 免费大模型），一条命令添加
-- **自动更新** — 启动时自动检测新版本，静默下载并重启升级
+- **协议自动转换** — Anthropic ↔ OpenAI 双向转换，含流式 SSE、工具调用、多模态图片
+- **Provider 模板** — 内置 13 个厂商预设（含 Agnes AI 免费大模型），一条命令添加
+- **安全加固** — API Key 加密存储、Bearer 认证、速率限制、TLS 支持
+- **自动更新** — 启动时自动检测新版本，SHA256 校验和验证，静默下载并重启升级
 - **优雅关闭** — SIGINT/SIGTERM 信号处理，安全关闭代理服务
 - **实时监控** — Web 仪表盘 + 终端实时日志
 - **热加载配置** — 修改配置文件自动生效，无需重启
@@ -31,7 +32,7 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **用量统计** — `api-switch usage` 按天统计 Token 用量、缓存命中率
 - **国内镜像** — Gitee 同步 + goproxy.cn 加速安装
 
-> **v0.8.0** — 稳定版：全面修复 SSE 流转换、DeepSeek 兼容性、端口自动同步、新增商汤商量 & 英伟达、安全加固
+> **v0.9.0** — 安全增强版：API Key 加密存储、Bearer 认证、SHA256 更新验证、速率限制、TLS 支持、多模态图片转换、代码模块化重构
 
 ## ⚡ 快速开始
 
@@ -397,10 +398,33 @@ claude ──→ /v1/messages ──┤
 
 | 文件 | 说明 |
 |---|---|
-| `~/.api-switch.yaml` | API-Switch 配置（提供商、模型路由） |
+| `~/.api-switch.yaml` | API-Switch 配置（提供商、模型路由、安全设置） |
+| `~/.api-switch/.key` | API Key 加密密钥（自动生成，权限 0600） |
 | `~/.claude/settings.json` | Claude Code 配置（由 `api-switch use` 管理） |
 | `~/.api-switch/usage.json` | 用量统计数据 |
 | `~/.api-switch/update-state.json` | 自动更新状态（上次检查时间） |
+
+### 服务器配置
+
+```yaml
+server:
+  port: 8080           # 代理端口
+  auth_token: ""       # API 认证 Token（可选，设置后需 Bearer 认证）
+  rate_limit: 100      # 每分钟每 IP 请求数限制（0 = 禁用）
+  tls_cert: ""         # TLS 证书路径（可选）
+  tls_key: ""          # TLS 密钥路径（可选）
+```
+
+### 安全功能
+
+| 功能 | 配置 | 说明 |
+|---|---|---|
+| API Key 加密 | 自动 | 使用 AES-256-GCM 加密存储，向后兼容明文配置 |
+| Bearer 认证 | `server.auth_token` | 设置后所有 API 请求需携带 `Authorization: Bearer <token>` |
+| 速率限制 | `server.rate_limit` | 每分钟每 IP 请求数限制，防止滥用 |
+| TLS/HTTPS | `server.tls_cert`, `server.tls_key` | 启用 HTTPS 加密传输 |
+| 更新验证 | 自动 | SHA256 校验和验证，防止供应链攻击 |
+| 管理端点保护 | 自动 | 仅 localhost 可访问，检查代理头防止绕过 |
 
 ### 两种提供商类型
 
@@ -417,7 +441,7 @@ claude ──→ /v1/messages ──┤
 | 流式 SSE | ✅ | OpenAI ↔ Anthropic SSE |
 | 工具调用 | ✅ | tools / tool_choice / tool_use / tool_result |
 | 流式工具调用 | ✅ | input_json_delta streaming |
-| 图片 | ✅ | Anthropic image → OpenAI image_url |
+| 多模态图片 | ✅ | Anthropic image block → OpenAI image_url（支持 base64 和 URL） |
 | System 消息 | ✅ | 自动置顶 |
 
 ## 🩺 常见问题

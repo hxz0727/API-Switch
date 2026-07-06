@@ -26,11 +26,13 @@ npx api-switch-cc serve
 ## Features
 
 - **13 built-in provider presets** — DeepSeek, Qwen, GLM, SenseNova (商汤), NVIDIA (英伟达), Moonshot, Agnes AI (free), Kimi, Yi, StepFun, ERNIE, Hunyuan, APIFree
+- **Security hardening** — Encrypted API key storage (AES-256-GCM), Bearer token auth, rate limiting, TLS support
 - **Auto sync settings.json** — serve startup automatically syncs Claude Code base URL
 - **Port persistence** — `serve -p <port>` saves to config; `--no-save-port` to skip
-- **Auto-update** — checks for new versions on startup, auto-downloads and restarts
+- **Auto-update with verification** — checks for new versions, SHA256 checksum validation
 - **Graceful shutdown** — SIGINT/SIGTERM signal handling
-- **Protocol conversion** — Anthropic ↔ OpenAI bidirectional (SSE streaming, tool calls, text)
+- **Protocol conversion** — Anthropic ↔ OpenAI bidirectional (SSE streaming, tool calls, multimodal images)
+- **Multimodal support** — Full image conversion (base64 and URL) for Vision models
 - **DeepSeek compatible** — auto-strips orphaned tool_calls for strict providers
 - **Hot-reload config** — changes take effect without restart
 - **Web dashboard** — real-time request monitoring at `/admin/` (localhost only)
@@ -71,6 +73,25 @@ api-switch serve               # default :8080, auto-syncs settings.json
 | `api-switch monitor` | View real-time traffic |
 | `api-switch usage` | Token usage statistics |
 | `api-switch update` | Update to latest version |
+
+## Security Configuration
+
+```yaml
+# ~/.api-switch.yaml
+server:
+  port: 8080
+  auth_token: ""      # Set to require Bearer authentication
+  rate_limit: 100     # Requests per minute per IP (0 = disabled)
+  tls_cert: ""        # TLS certificate path (optional)
+  tls_key: ""         # TLS key path (optional)
+```
+
+Security features:
+- **Encrypted API keys** — Stored with AES-256-GCM, auto-migrates from plaintext
+- **Bearer authentication** — Set `auth_token` to require `Authorization: Bearer <token>`
+- **Rate limiting** — Protect against DoS abuse
+- **TLS/HTTPS** — Enable encrypted communication
+- **Update verification** — SHA256 checksum validation for auto-updates
 
 See the [full documentation](https://github.com/hxz0727/API-Switch) on GitHub.
 

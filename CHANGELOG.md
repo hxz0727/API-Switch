@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.9.0 (2026-07-06)
+
+### 安全增强
+
+- **API Key 加密存储**: 使用 AES-256-GCM 加密算法存储 API 密钥，密钥文件权限 0600
+- **Bearer Token 认证**: 支持为 API 端点配置认证 Token (`server.auth_token`)
+- **更新安全验证**: 自动更新时验证 SHA256 校验和，防止供应链攻击
+- **管理端点加固**: 检查 X-Forwarded-For 和 X-Real-IP 头，防止反向代理绕过
+- **速率限制**: 每IP每分钟 100 请求限制，防止 DoS 攻击 (`server.rate_limit`)
+- **TLS/HTTPS 支持**: 支持配置 TLS 证书和密钥 (`server.tls_cert`, `server.tls_key`)
+
+### 功能改进
+
+- **图片转换**: 实现完整的 Anthropic image block → OpenAI image_url 格式转换
+  - 支持 base64 图片数据 (`data:image/png;base64,...`)
+  - 支持 URL 图片直接传递
+  - 完整的多模态 Vision 功能支持
+- **status 命令增强**: 显示当前激活模型和配置统计信息
+- **配置选项扩展**: 新增 `rate_limit`, `tls_cert`, `tls_key` 配置项
+
+### 代码重构
+
+- **main.go 模块化**: 将 1672 行拆分为 8 个独立文件
+  - `main.go`: 命令定义和入口
+  - `serve.go`: serve/daemon 相关命令
+  - `provider.go`: provider/model 管理命令
+  - `use.go`: use/setup 命令
+  - `config_cmd.go`: 配置管理命令
+  - `update.go`: 更新命令
+  - `doctor.go`: 诊断命令
+  - `monitor.go`: 实时监控命令
+
+### 新增文件
+
+- `internal/secrets/encrypt.go`: API Key 加密模块
+- `internal/secrets/encrypt_test.go`: 加密模块测试
+- `internal/proxy/ratelimit.go`: 请求速率限制中间件
+
+### 测试更新
+
+- 修复工具调用测试用例（添加 tool_result 消息）
+- 更新图片转换测试用例（验证多模态格式）
+- 更新更新测试用例（SHA256 校验和验证）
+
+### 配置文件示例
+
+```yaml
+server:
+  port: 8080
+  auth_token: ""      # API 认证 token (可选)
+  rate_limit: 100     # 每分钟每IP请求数限制 (0=禁用)
+  tls_cert: ""        # TLS 证书路径 (可选)
+  tls_key: ""         # TLS 密钥路径 (可选)
+```
+
+---
+
 ## v0.8.0 (2026-07-03)
 
 ### 稳定性修复
