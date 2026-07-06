@@ -42,6 +42,9 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 # 安装
 npm install -g api-switch-cc
 
+# 查看所有内置厂商
+api-switch provider known
+
 # DeepSeek — 自动填充 base_url、type、建议模型
 api-switch setup deepseek --key sk-xxx
 
@@ -55,7 +58,10 @@ api-switch serve
 ### 方式二：分步操作
 
 ```bash
-# 1. 添加提供商
+# 1. 查看已知厂商
+api-switch provider known
+
+# 2. 添加提供商
 api-switch provider add deepseek --key sk-xxx
 
 # 2. 导入模型
@@ -525,7 +531,15 @@ curl -X POST http://localhost:8080/admin/reload
 ## 📁 项目结构
 
 ```
-cmd/api-switch/main.go              # CLI 入口
+cmd/api-switch/
+├── main.go              # CLI 入口和命令注册
+├── serve.go             # serve / daemon 命令
+├── provider.go          # provider / model 管理
+├── use.go               # use / setup / test 命令
+├── config_cmd.go        # config 管理命令
+├── update.go            # 自动更新命令
+├── doctor.go            # 一键诊断命令
+└── monitor.go           # 实时监控命令
 internal/
 ├── config/
 │   ├── config.go                   # 配置类型、加载、保存、路由
@@ -548,18 +562,21 @@ internal/
 │   ├── openai.go                   # OpenAI API 客户端
 │   └── openai_test.go              # 客户端单元测试
 ├── proxy/
-│   ├── handler.go                  # HTTP 代理 + 请求处理
+│   ├── handler.go                  # HTTP 代理 + 请求处理 + 认证中间件
 │   ├── admin.go                    # 管理端点（仪表盘、SSE、监控）
 │   ├── converter.go                # Anthropic ↔ OpenAI 请求转换
 │   ├── converter_test.go           # 转换器单元测试
 │   ├── response.go                 # OpenAI → Anthropic 响应转换
-│   ├── response_test.go            # 响应转换单元测试
+│   ├── ratelimit.go                # 请求速率限制中间件
 │   └── router.go                   # 模型路由
+├── secrets/
+│   ├── encrypt.go                  # API Key AES-256-GCM 加密
+│   └── encrypt_test.go             # 加密单元测试
 ├── streaming/
 │   ├── sse.go                      # SSE 流式转换
 │   └── sse_test.go                 # SSE 转换单元测试
 ├── update/
-│   ├── updater.go                  # 自动更新核心逻辑
+│   ├── updater.go                  # 自动更新 + SHA256 校验
 │   ├── updater_test.go             # 更新功能单元测试
 │   ├── exec_unix.go                # Unix 进程重启
 │   └── exec_windows.go             # Windows 进程重启

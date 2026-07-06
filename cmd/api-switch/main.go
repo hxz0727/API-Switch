@@ -13,7 +13,7 @@ var (
 )
 
 // Version injected at build time via -ldflags, or falls back to default.
-var Version = "0.4.6-dev"
+var Version = "0.9.0"
 
 func main() {
 	rootCmd := &cobra.Command{
