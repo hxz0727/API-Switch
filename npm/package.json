@@ -1,6 +1,6 @@
 {
   "name": "api-switch-cc",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Claude Code 多模型代理 — 一���切换 DeepSeek、Qwen、GLM、商汤商量、NVIDIA 等国产大模型，协议自动转换，零配置即用。安全增强版：API Key 加密存储、Bearer 认证、SHA256 验证、速率限制、TLS 支持。LLM API proxy for Claude Code with security hardening.",
   "bin": {
     "api-switch": "api-switch.js"

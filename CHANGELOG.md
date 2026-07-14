@@ -1,12 +1,38 @@
 # Changelog
 
+## v0.9.2 (2026-07-14)
+
+### 安全加固 (代码审计)
+
+- **速率限制**: 修复按连接而非 IP 限速的绕过漏洞，改用滑动窗口算法
+- **Token 比对**: 使用时序安全的 `crypto/subtle.ConstantTimeCompare`
+- **并发安全**: 使用 `atomic.Value` + `sync.Once` 消除全局状态和 config 热点数据竞争
+- **IPv6 检测**: 修复 `::1` 前缀匹配误判非 loopback 地址，统一使用 `net.IP.IsLoopback()`
+- **密钥保护**: 密钥文件损坏时拒绝静默覆盖，报错并提示手动删除
+
+### 流稳定性
+
+- **写错误检测**: SSE 流写入错误不再静默丢弃，检测到立即终止
+- **服务端超时**: 配置 `WriteTimeout=0` 保证长连接，`ReadTimeout=30s` 防止慢速攻击
+- **上游取消**: OpenAI 流式传输新增 `closeOnCancel`，客户端断开时取消上游
+- **Anthropic 流**: StreamMessage 先拷贝再设 `Stream=true`，不再污染调用方
+
+### 转换修复
+
+- **图片转换**: Anthropic image block → OpenAI image_url 双向支持 base64 和 URL
+- **tool_result**: 修复 plain string 格式丢失 ToolCallID，正确处理嵌套 content block
+- **top_k**: 保留 Anthropic 的 top_k 参数传递给 OpenAI 兼容 API
+- **空字符串加密**: 区分"未加密空值"和"加密空值"，消除歧义
+
+### 文档更新
+
+- 更新 README 项目结构和快速开始
+- 添加服务器安全配置章节
+- npm README 新增安全功能说明
+
+---
+
 ## v0.9.1 (2026-07-14)
-
-### 修复
-
-- **npm 安装反复更新**: 修复 `api-switch.js` 版本比对逻辑，不再因 `v` 前缀不一致导致每次启动都重新下载二进制
-
-## v0.9.0 (2026-07-06)
 
 ### 安全增强
 
