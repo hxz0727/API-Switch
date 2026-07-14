@@ -3,11 +3,13 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
+	crand "crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -57,7 +59,7 @@ func (km *KeyManager) loadOrGenerateKey() error {
 
 	// Key file does not exist — generate new 256-bit key
 	km.key = make([]byte, 32)
-	if _, err := rand.Read(km.key); err != nil {
+	if _, err := io.ReadFull(crand.Reader, km.key); err != nil {
 		return fmt.Errorf("cannot generate key: %w", err)
 	}
 
@@ -70,10 +72,8 @@ func (km *KeyManager) loadOrGenerateKey() error {
 }
 
 // Encrypt encrypts a plaintext string and returns a hex-encoded ciphertext.
+// Empty strings are encrypted as well to distinguish them from unencrypted values.
 func (km *KeyManager) Encrypt(plaintext string) (string, error) {
-	if plaintext == "" {
-		return "", nil
-	}
 
 	block, err := aes.NewCipher(km.key)
 	if err != nil {
@@ -87,7 +87,7 @@ func (km *KeyManager) Encrypt(plaintext string) (string, error) {
 
 	// Generate random nonce
 	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
+	if _, err := io.ReadFull(crand.Reader, nonce); err != nil {
 		return "", fmt.Errorf("cannot generate nonce: %w", err)
 	}
 
@@ -141,7 +141,7 @@ func (km *KeyManager) Decrypt(ciphertext string) (string, error) {
 
 // IsEncrypted checks if a string is encrypted (has the "enc:" prefix).
 func IsEncrypted(s string) bool {
-	return len(s) > 4 && s[:4] == "enc:"
+	return strings.HasPrefix(s, "enc:")
 }
 
 // Global key manager instance

@@ -35,8 +35,16 @@ func TestEncryptDecrypt(t *testing.T) {
 			}
 
 			if tt.plaintext == "" {
-				if encrypted != "" {
-					t.Errorf("Empty plaintext should return empty ciphertext")
+				// Empty strings are now also encrypted to distinguish from unencrypted values
+				if !IsEncrypted(encrypted) {
+					t.Errorf("Empty plaintext should be encrypted")
+				}
+				decrypted, err := km.Decrypt(encrypted)
+				if err != nil {
+					t.Fatalf("Decrypt empty failed: %v", err)
+				}
+				if decrypted != "" {
+					t.Errorf("Decrypted empty got %q, want empty", decrypted)
 				}
 				return
 			}

@@ -41,7 +41,7 @@ func isLocalhostRequest(r *http.Request) bool {
 		ips := strings.Split(xff, ",")
 		if len(ips) > 0 {
 			clientIP := strings.TrimSpace(ips[0])
-			if !isLocalhostIP(clientIP) {
+			if clientIP != "" && !isLocalhostIP(clientIP) {
 				return false
 			}
 		}
