@@ -23,6 +23,16 @@
 - **tool_result**: 修复 plain string 格式丢失 ToolCallID，正确处理嵌套 content block
 - **top_k**: 保留 Anthropic 的 top_k 参数传递给 OpenAI 兼容 API
 - **空字符串加密**: 区分"未加密空值"和"加密空值"，消除歧义
+- **更新降级**: checksums.txt 不可用时自动降级为直接下载，不阻断更新
+
+### 工具链
+
+- **release.sh**: 全新 6 阶段自动发布脚本，含前置检查（测试/vet/版本一致性）
+
+- **图片转换**: Anthropic image block → OpenAI image_url 双向支持 base64 和 URL
+- **tool_result**: 修复 plain string 格式丢失 ToolCallID，正确处理嵌套 content block
+- **top_k**: 保留 Anthropic 的 top_k 参数传递给 OpenAI 兼容 API
+- **空字符串加密**: 区分"未加密空值"和"加密空值"，消除歧义
 
 ### 文档更新
 

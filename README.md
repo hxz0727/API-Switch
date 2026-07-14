@@ -32,7 +32,7 @@ claude → api-switch → ├─ claude-*  → Anthropic API (透传)
 - **用量统计** — `api-switch usage` 按天统计 Token 用量、缓存命中率
 - **国内镜像** — Gitee 同步 + goproxy.cn 加速安装
 
-> **v0.9.0** — 安全增强版：API Key 加密存储、Bearer 认证、SHA256 更新验证、速率限制、TLS 支持、多模态图片转换、代码模块化重构
+> **v0.9.2** — 安全审计加固版：31 个问题修复、滑动窗口限流、时序安全比对、原子配置、SSE 流稳定性
 
 ## ⚡ 快速开始
 
@@ -528,9 +528,26 @@ curl -X POST http://localhost:8080/admin/reload
 
 **更新优先级：** Gitee 镜像 → GitHub Release → npm 更新 → go install
 
+### 维护者：如何发布新版本？
+
+```bash
+# 1. 更新 CHANGELOG.md
+# 2. 试运行检查前置条件
+./release.sh v0.9.3 --dry-run
+
+# 3. 正式发布
+export GITEE_TOKEN=<gitee_access_token>
+export NPM_TOKEN=<npm_publish_token>
+./release.sh v0.9.3
+```
+
+发布脚本会自动完成：版本号更新 → 二进制编译校验 → SHA256 生成 → Git tag + push → Gitee release 页创建 → 二进制上传 → npm 发布 → 验证。
+
 ## 📁 项目结构
 
 ```
+├── release.sh            # 自动化发布脚本 (6阶段)
+├── bump.sh               # release.sh 兼容包装
 cmd/api-switch/
 ├── main.go              # CLI 入口和命令注册
 ├── serve.go             # serve / daemon 命令
