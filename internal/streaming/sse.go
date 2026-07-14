@@ -136,8 +136,16 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 
 		choice := chunk.Choices[0]
 
-		// Forward content deltas (skip reasoning/thinking field)
-		if choice.Delta.Content != "" {
+		// Determine text content: some providers (SenseNova) put response text
+		// in the "reasoning" field instead of "content". Use content if available,
+		// otherwise fall back to reasoning.
+		textDelta := choice.Delta.Content
+		if textDelta == "" {
+			textDelta = choice.Delta.Reasoning
+		}
+
+		// Forward text content deltas
+		if textDelta != "" {
 			// Start text content block if not started (index 0)
 			if !textBlockStarted {
 				if err := writeAnthropicEvent(writer, flusher, canFlush, "content_block_start", anthropic.ContentBlockStartEvent{
