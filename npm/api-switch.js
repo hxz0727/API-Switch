@@ -50,11 +50,14 @@ function hasGit() {
 }
 
 function ensureInstalled() {
+  const expectedVer = VERSION.replace(/^v/, ""); // "0.9.0" without v prefix
   if (existsSync(BIN_PATH)) {
     try {
       const current = execSync(`"${BIN_PATH}" version`, { encoding: "utf8", stdio: "pipe", timeout: 5000 }).trim();
-      if (current.includes(VERSION)) return;
-      console.log(`Updating binary from ${current} to ${VERSION}...`);
+      const match = current.match(/(\d+\.\d+\.\d+)/);
+      if (match && match[1] === expectedVer) return;
+      const oldVer = match ? match[1] : current;
+      console.log(`Updating binary from api-switch version ${oldVer} to ${VERSION}...`);
     } catch (_) {}
   }
 
