@@ -131,8 +131,12 @@ func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 	}
 
 	s.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      0,  // 0 = no timeout, required for SSE streaming
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Check if TLS is configured
@@ -427,9 +431,13 @@ func (s *Server) handleOpenAIStreaming(ctx context.Context, w http.ResponseWrite
 	}
 	defer respBody.Close()
 
+	// Close upstream body when client disconnects
+	closeOnCancel(ctx, respBody)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	flusher, canFlush := w.(http.Flusher)
 
