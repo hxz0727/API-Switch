@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // KeyManager manages encryption keys for API key storage.
@@ -139,34 +140,32 @@ func IsEncrypted(s string) bool {
 }
 
 // Global key manager instance
-var globalKeyManager *KeyManager
+var (
+	globalKeyManager *KeyManager
+	initOnce         sync.Once
+	initErr          error
+)
 
 // InitGlobalKeyManager initializes the global key manager.
 func InitGlobalKeyManager() error {
-	km, err := NewKeyManager(DefaultKeyPath())
-	if err != nil {
-		return err
-	}
-	globalKeyManager = km
-	return nil
+	initOnce.Do(func() {
+		globalKeyManager, initErr = NewKeyManager(DefaultKeyPath())
+	})
+	return initErr
 }
 
 // EncryptString encrypts a string using the global key manager.
 func EncryptString(plaintext string) (string, error) {
-	if globalKeyManager == nil {
-		if err := InitGlobalKeyManager(); err != nil {
-			return "", err
-		}
+	if err := InitGlobalKeyManager(); err != nil {
+		return "", err
 	}
 	return globalKeyManager.Encrypt(plaintext)
 }
 
 // DecryptString decrypts a string using the global key manager.
 func DecryptString(ciphertext string) (string, error) {
-	if globalKeyManager == nil {
-		if err := InitGlobalKeyManager(); err != nil {
-			return "", err
-		}
+	if err := InitGlobalKeyManager(); err != nil {
+		return "", err
 	}
 	return globalKeyManager.Decrypt(ciphertext)
 }

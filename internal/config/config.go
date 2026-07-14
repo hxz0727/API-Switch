@@ -189,7 +189,9 @@ func (c *Config) RouteModel(model string) (providerName string, provCfg *Provide
 		actualModel = modelCfg.ModelOverride
 	}
 
-	return modelCfg.Provider, &prov, actualModel, nil
+	// Return a new copy to avoid returning pointer to loop-local variable
+	provCopy := prov
+	return modelCfg.Provider, &provCopy, actualModel, nil
 }
 
 // YamlMarshal marshals the config to YAML bytes.

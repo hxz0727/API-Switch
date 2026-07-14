@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -86,7 +87,7 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := parts[1]
-		if token != s.cfg.Server.AuthToken {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.Server.AuthToken)) != 1 {
 			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error",
 				"Invalid authentication token")
 			return

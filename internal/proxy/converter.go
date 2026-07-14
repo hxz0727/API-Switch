@@ -174,7 +174,7 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 		// Handle tool_result role mapping
 		if msg.Role == "tool_result" {
 			oaiMsg.Role = "tool"
-			// Extract tool_use_id from content blocks
+			// Extract tool_use_id and content from content blocks or plain string
 			var blocks []anthropic.ContentBlock
 			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
 				var contentParts []string
@@ -188,8 +188,16 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 						contentParts = append(contentParts, contentToString(b.Content))
 					}
 				}
-				if oaiMsg.Content == "" {
+				if oaiMsg.Content == "" && len(contentParts) > 0 {
 					oaiMsg.Content = strings.Join(contentParts, "\n")
+				}
+			} else {
+				// Plain string content — try to extract ToolUseID from top-level fields
+				var rawMap map[string]interface{}
+				if json.Unmarshal(msg.Content, &rawMap) == nil {
+					if id, ok := rawMap["tool_use_id"].(string); ok && id != "" {
+						oaiMsg.ToolCallID = id
+					}
 				}
 			}
 			if oaiMsg.Content == "" {
