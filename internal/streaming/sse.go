@@ -168,7 +168,7 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 				Index: textBlockIndex,
 				Delta: anthropic.DeltaBlock{
 					Type: "text_delta",
-					Text: choice.Delta.Content,
+					Text: textDelta,
 				},
 			}); err != nil {
 				return fmt.Errorf("write text delta: %w", err)

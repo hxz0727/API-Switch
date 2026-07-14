@@ -282,6 +282,70 @@ func TestMapFinishReason_Length(t *testing.T) {
 	}
 }
 
+func TestOpenAIToAnthropicStream_SenseNovaReasoningField(t *testing.T) {
+	// SenseNova puts response text in the 'reasoning' field instead of 'content'
+	sseInput := strings.Join([]string{
+		`data: {"id":"chatcmpl-001","object":"chat.completion.chunk","created":1234567890,"model":"sensenova-6.7","choices":[{"index":0,"delta":{"reasoning":"你好"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl-001","object":"chat.completion.chunk","created":1234567890,"model":"sensenova-6.7","choices":[{"index":0,"delta":{"reasoning":"世界"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"chatcmpl-001","object":"chat.completion.chunk","created":1234567890,"model":"sensenova-6.7","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	reader := strings.NewReader(sseInput)
+	var buf nopWriteFlusher
+
+	err := OpenAIToAnthropicStream(reader, &buf, &buf, true, "sensenova-6.7", 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should contain both pieces of text from the reasoning field
+	if !strings.Contains(output, `"你好"`) {
+		t.Errorf("missing '你好' in output (reasoning field should be used as content)\nOutput:\n%s", output)
+	}
+	if !strings.Contains(output, `"世界"`) {
+		t.Errorf("missing '世界' in output (reasoning field should be used as content)\nOutput:\n%s", output)
+	}
+	if !strings.Contains(output, "event: message_stop") {
+		t.Error("missing message_stop event")
+	}
+}
+
+func TestOpenAIToAnthropicStream_ContentOverReasoning(t *testing.T) {
+	// When both content and reasoning are present, content takes priority
+	sseInput := strings.Join([]string{
+		`data: {"id":"x","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello","reasoning":"thinking..."},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"x","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	reader := strings.NewReader(sseInput)
+	var buf nopWriteFlusher
+
+	err := OpenAIToAnthropicStream(reader, &buf, &buf, true, "test-model", 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	if !strings.Contains(output, `"Hello"`) {
+		t.Errorf("missing 'Hello' in output (content should take priority over reasoning)")
+	}
+	if strings.Contains(output, `"thinking..."`) {
+		t.Error("reasoning content leaked into output when content was present")
+	}
+}
+
 func TestMapFinishReason_ToolCalls(t *testing.T) {
 	s := "tool_calls"
 	result := mapFinishReason(&s)
