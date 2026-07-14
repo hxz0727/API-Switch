@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -16,7 +17,7 @@ import (
 // OpenAIToAnthropicStream reads OpenAI SSE events and writes Anthropic SSE events.
 func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher http.Flusher, canFlush bool, requestedModel string, inputTokens int) error {
 	scanner := bufio.NewScanner(openaiBody)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // 4MB max line
 
 	msgID := generateMessageID()
 	textBlockStarted := false
@@ -87,17 +88,21 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 	}
 
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.TrimSpace(scanner.Text())
 
 		if line == "" {
 			continue
 		}
 
-		if !strings.HasPrefix(line, "data: ") {
+		// Accept both "data: " and "data:" without a space
+		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
 
-		data := strings.TrimPrefix(line, "data: ")
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
 
 		// Check for stream end
 		if data == "[DONE]" {
@@ -111,6 +116,12 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 
 		var chunk openai.ChatCompletionChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// Log a warning for malformed chunks, then continue
+			if len(data) > 200 {
+				log.Printf("WARNING: SSE JSON parse error (first 200 chars): %s... %v", data[:200], err)
+			} else {
+				log.Printf("WARNING: SSE JSON parse error: %s %v", data, err)
+			}
 			continue
 		}
 
@@ -222,7 +233,7 @@ func OpenAIToAnthropicStream(openaiBody io.Reader, writer io.Writer, flusher htt
 // This is used when the model is an Anthropic model and we're just proxying.
 func AnthropicPassthroughStream(body io.Reader, writer io.Writer, flusher http.Flusher, canFlush bool) error {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024) // 4MB max line
 
 	for scanner.Scan() {
 		line := scanner.Text()
