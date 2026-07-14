@@ -220,6 +220,7 @@ func platformKey() string {
 
 // DoUpdate performs the actual self-update.
 // It downloads the latest binary, verifies SHA256 checksum, and replaces the current one.
+// If checksums.txt is unavailable, falls back to download without verification.
 func DoUpdate(currentBinary string, latestVersion string) error {
 	// Determine platform
 	plat := platformKey()
@@ -235,35 +236,34 @@ func DoUpdate(currentBinary string, latestVersion string) error {
 
 	// Try Gitee first, then GitHub
 	sources := []struct {
-		binaryURL    string
-		checksumURL  string
-		sourceName   string
+		binaryURL   string
+		checksumURL string
+		sourceName  string
 	}{
 		{
-			binaryURL:   fmt.Sprintf("%s/%s/%s", GiteeRawBase, latestVersion, binaryName),
+			binaryURL:  fmt.Sprintf("%s/%s/%s", GiteeRawBase, latestVersion, binaryName),
 			checksumURL: fmt.Sprintf("%s/%s/checksums.txt", GiteeRawBase, latestVersion),
-			sourceName:  "Gitee",
+			sourceName: "Gitee",
 		},
 		{
-			binaryURL:   fmt.Sprintf("%s/%s/%s", GitHubDownloadBase, latestVersion, binaryName),
+			binaryURL:  fmt.Sprintf("%s/%s/%s", GitHubDownloadBase, latestVersion, binaryName),
 			checksumURL: fmt.Sprintf("%s/%s/checksums.txt", GitHubDownloadBase, latestVersion),
-			sourceName:  "GitHub",
+			sourceName: "GitHub",
 		},
 	}
 
+	// Phase 1: Try with checksum verification
 	var lastErr error
 	for _, src := range sources {
-		logutil.Debug("Auto-update: trying %s", src.sourceName)
+		logutil.Debug("Auto-update: trying %s (with SHA256)", src.sourceName)
 
-		// Download checksums first
 		expectedHash, err := fetchChecksum(src.checksumURL, binaryName)
 		if err != nil {
-			logutil.Debug("Auto-update: failed to fetch checksum from %s: %v", src.sourceName, err)
-			lastErr = err
+			logutil.Debug("Auto-update: checksum unavailable from %s: %v", src.sourceName, err)
+			// Don't consider checksum-unavailable as a fatal error — try without it in Phase 2
 			continue
 		}
 
-		// Download and verify binary
 		if err := downloadVerifyAndReplace(src.binaryURL, currentBinary, expectedHash); err != nil {
 			logutil.Debug("Auto-update: %s failed: %v", src.sourceName, err)
 			lastErr = err
@@ -271,6 +271,21 @@ func DoUpdate(currentBinary string, latestVersion string) error {
 		}
 
 		logutil.Info("Auto-update successful: %s (verified SHA256)", latestVersion)
+		return nil
+	}
+
+	// Phase 2: Fall back to download without checksum verification
+	logutil.Debug("Auto-update: falling back to download without checksum verification")
+	for _, src := range sources {
+		logutil.Debug("Auto-update: trying %s (no checksum)", src.sourceName)
+
+		if err := downloadVerifyAndReplace(src.binaryURL, currentBinary, ""); err != nil {
+			logutil.Debug("Auto-update: %s failed: %v", src.sourceName, err)
+			lastErr = err
+			continue
+		}
+
+		logutil.Info("Auto-update successful: %s", latestVersion)
 		return nil
 	}
 
@@ -354,13 +369,15 @@ func downloadVerifyAndReplace(url, targetPath, expectedHash string) error {
 	}
 	f.Close()
 
-	// Verify SHA256
-	actualHash := hex.EncodeToString(hasher.Sum(nil))
-	if actualHash != expectedHash {
-		os.Remove(tmpFile)
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+	// Verify SHA256 (skip if no expected hash provided, e.g. checksums unavailable)
+	if expectedHash != "" {
+		actualHash := hex.EncodeToString(hasher.Sum(nil))
+		if actualHash != expectedHash {
+			os.Remove(tmpFile)
+			return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+		}
+		logutil.Debug("Auto-update: SHA256 verified (%s)", actualHash[:16]+"...")
 	}
-	logutil.Debug("Auto-update: SHA256 verified (%s)", actualHash[:16]+"...")
 
 	// Replace current binary atomically
 	if err := os.Rename(tmpFile, targetPath); err != nil {
