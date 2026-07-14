@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -25,7 +26,7 @@ import (
 // Server is the HTTP proxy server for Claude Code.
 // It accepts Anthropic Messages API requests and routes them to the correct provider.
 type Server struct {
-	cfg          *config.Config
+	cfg          atomic.Value // *config.Config — safe for concurrent read
 	cfgPath      string
 	router       *Router
 	tracker      *monitor.Tracker
@@ -33,6 +34,16 @@ type Server struct {
 	mu           sync.Mutex
 	httpServer   *http.Server
 	done         chan struct{}
+}
+
+// getConfig returns the current config safely for concurrent reads.
+func (s *Server) getConfig() *config.Config {
+	return s.cfg.Load().(*config.Config)
+}
+
+// setConfig atomically updates the server config.
+func (s *Server) setConfig(cfg *config.Config) {
+	s.cfg.Store(cfg)
 }
 
 // DefaultUsagePath returns the default usage data file path.
@@ -52,12 +63,12 @@ func initUsageTracker() *usage.Tracker {
 // NewServer creates a new proxy server.
 func NewServer(cfg *config.Config) *Server {
 	s := &Server{
-		cfg:          cfg,
 		router:       NewRouter(cfg),
 		tracker:      monitor.NewTracker(1000),
 		usageTracker: initUsageTracker(),
 		done:         make(chan struct{}),
 	}
+	s.setConfig(cfg)
 	return s
 }
 
@@ -65,7 +76,8 @@ func NewServer(cfg *config.Config) *Server {
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth if no token configured
-		if s.cfg.Server.AuthToken == "" {
+		cfg := s.getConfig()
+		if cfg.Server.AuthToken == "" {
 			next(w, r)
 			return
 		}
@@ -87,7 +99,7 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := parts[1]
-		if subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.Server.AuthToken)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(cfg.Server.AuthToken)) != 1 {
 			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error",
 				"Invalid authentication token")
 			return
@@ -106,11 +118,10 @@ func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 	handler := s.rateLimitMiddleware(s.authMiddleware(s.handleMessages))
 	mux.HandleFunc("/v1/messages", handler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		s.mu.Lock()
-		numModels := len(s.cfg.Models)
-		numProviders := len(s.cfg.Providers)
+		cfg := s.getConfig()
+		numModels := len(cfg.Models)
+		numProviders := len(cfg.Providers)
 		reqStats := s.tracker.Stats()["total_requests"]
-		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "ok",
@@ -141,9 +152,10 @@ func (s *Server) StartWithConfigFile(addr string, cfgPath string) error {
 	}
 
 	// Check if TLS is configured
-	if s.cfg.Server.TLSCert != "" && s.cfg.Server.TLSKey != "" {
-		logutil.Info("TLS enabled: cert=%s, key=%s", s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
-		return s.httpServer.ListenAndServeTLS(s.cfg.Server.TLSCert, s.cfg.Server.TLSKey)
+	cfg := s.getConfig()
+	if cfg.Server.TLSCert != "" && cfg.Server.TLSKey != "" {
+		logutil.Info("TLS enabled: cert=%s, key=%s", cfg.Server.TLSCert, cfg.Server.TLSKey)
+		return s.httpServer.ListenAndServeTLS(cfg.Server.TLSCert, cfg.Server.TLSKey)
 	}
 
 	return s.httpServer.ListenAndServe()
@@ -161,9 +173,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // ReloadConfig reloads the config and reinitializes the router.
 func (s *Server) ReloadConfig(cfg *config.Config) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cfg = cfg
+	s.setConfig(cfg)
 	s.router.Reload(cfg)
 	logutil.Info("Config reloaded: %d models, %d providers", len(cfg.Models), len(cfg.Providers))
 }

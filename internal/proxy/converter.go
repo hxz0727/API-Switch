@@ -235,6 +235,7 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 		MaxTokens:   &maxTokens,
 		Temperature: antReq.Temperature,
 		TopP:        antReq.TopP,
+		TopK:        antReq.TopK,
 		Stream:      antReq.Stream,
 	}
 

@@ -9,29 +9,21 @@ import (
 	"time"
 )
 
-// RateLimiter implements a token bucket rate limiter.
+// RateLimiter implements a sliding-window rate limiter.
+// It records request timestamps and counts those within the sliding window.
 type RateLimiter struct {
-	mu           sync.Mutex
-	requests     map[string]*clientBucket
-	maxRequests  int           // max requests per window
-	window       time.Duration // time window
-	cleanupEvery time.Duration // cleanup interval
-	lastCleanup  time.Time
+	mu          sync.Mutex
+	requests    map[string][]int64 // timestamps per client IP (UnixNano)
+	maxRequests int                // max requests per window
+	window      time.Duration      // sliding window duration
 }
 
-type clientBucket struct {
-	count     int
-	expiresAt time.Time
-}
-
-// NewRateLimiter creates a new rate limiter.
+// NewRateLimiter creates a new sliding-window rate limiter.
 func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
-		requests:     make(map[string]*clientBucket),
-		maxRequests:  maxRequests,
-		window:       window,
-		cleanupEvery: window * 2,
-		lastCleanup:  time.Now(),
+		requests:    make(map[string][]int64),
+		maxRequests: maxRequests,
+		window:      window,
 	}
 }
 
@@ -40,33 +32,43 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
+	now := time.Now().UnixNano()
+	cutoff := now - rl.window.Nanoseconds()
 
-	// Periodic cleanup of expired buckets
-	if now.Sub(rl.lastCleanup) > rl.cleanupEvery {
-		for ip, bucket := range rl.requests {
-			if now.After(bucket.expiresAt) {
-				delete(rl.requests, ip)
-			}
-		}
-		rl.lastCleanup = now
-	}
-
-	bucket, exists := rl.requests[clientIP]
-	if !exists || now.After(bucket.expiresAt) {
-		// New window
-		rl.requests[clientIP] = &clientBucket{
-			count:     1,
-			expiresAt: now.Add(rl.window),
-		}
+	timestamps, exists := rl.requests[clientIP]
+	if !exists {
+		rl.requests[clientIP] = []int64{now}
 		return true
 	}
 
-	if bucket.count >= rl.maxRequests {
+	// Trim expired timestamps from the front (they are in chronological order)
+	var valid []int64
+	for _, ts := range timestamps {
+		if ts > cutoff {
+			break
+		}
+		valid = timestamps[1:]
+	}
+	if len(valid) == 0 {
+		valid = nil
+	}
+
+	// Actually, we need to filter properly - find the first non-expired index
+	start := 0
+	for start < len(timestamps) && timestamps[start] <= cutoff {
+		start++
+	}
+
+	// Count requests in the sliding window
+	count := len(timestamps) - start
+	if count >= rl.maxRequests {
 		return false
 	}
 
-	bucket.count++
+	// Append new timestamp and clean up expired entries
+	timestamps = append(timestamps[start:], now)
+	rl.requests[clientIP] = timestamps
+
 	return true
 }
 
@@ -77,7 +79,8 @@ func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip rate limiting if not configured
-		if s.cfg == nil || s.cfg.Server.RateLimit == 0 {
+		cfg := s.getConfig()
+		if cfg == nil || cfg.Server.RateLimit == 0 {
 			next(w, r)
 			return
 		}

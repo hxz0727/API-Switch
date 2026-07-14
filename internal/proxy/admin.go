@@ -66,22 +66,21 @@ func isLocalhostRequest(r *http.Request) bool {
 // isLocalhostIP checks if an IP address is localhost.
 func isLocalhostIP(ip string) bool {
 	// Handle IPv6 bracket notation
+	ip = strings.TrimPrefix(ip, "]")
 	ip = strings.TrimPrefix(ip, "[")
 
-	switch ip {
-	case "127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1":
-		return true
-	default:
-		// Check if it's a loopback address (127.x.x.x)
-		if strings.HasPrefix(ip, "127.") {
-			return true
-		}
-		// Check IPv6 loopback (::1/128)
-		if strings.HasPrefix(ip, "::1") {
-			return true
-		}
-		return false
+	// Use net.IP.IsLoopback() for proper loopback detection
+	if parsed := net.ParseIP(ip); parsed != nil {
+		return parsed.IsLoopback()
 	}
+
+	// Fallback string comparison for edge cases
+	switch ip {
+	case "localhost":
+		return true
+	}
+
+	return false
 }
 
 func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
@@ -151,10 +150,11 @@ func (s *Server) handleAdminReload(w http.ResponseWriter, r *http.Request) {
 
 	s.reloadConfigFromFile()
 
+	cfg := s.getConfig()
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "ok",
-		"message": fmt.Sprintf("Config reloaded: %d models, %d providers", len(s.cfg.Models), len(s.cfg.Providers)),
+		"message": fmt.Sprintf("Config reloaded: %d models, %d providers", len(cfg.Models), len(cfg.Providers)),
 	}); err != nil {
 		logutil.Warn("Failed to encode reload response: %v", err)
 	}

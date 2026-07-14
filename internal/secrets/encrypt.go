@@ -45,12 +45,17 @@ func (km *KeyManager) loadOrGenerateKey() error {
 
 	// Try to load existing key
 	data, err := os.ReadFile(km.keyPath)
-	if err == nil && len(data) == 32 {
-		km.key = data
-		return nil
+	if err == nil {
+		if len(data) == 32 {
+			km.key = data
+			return nil
+		}
+		// Key file exists but is corrupted (wrong size) — do NOT silently overwrite
+		return fmt.Errorf("encryption key file %s is corrupted: expected 32 bytes, got %d. "+
+			"Remove it to regenerate: rm %s", km.keyPath, len(data), km.keyPath)
 	}
 
-	// Generate new 256-bit key
+	// Key file does not exist — generate new 256-bit key
 	km.key = make([]byte, 32)
 	if _, err := rand.Read(km.key); err != nil {
 		return fmt.Errorf("cannot generate key: %w", err)
