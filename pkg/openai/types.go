@@ -35,6 +35,7 @@ type Message struct {
 	ToolCallID string          `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
 	Name       string          `json:"name,omitempty"`
+	Reasoning  string          `json:"reasoning,omitempty"` // some providers (SenseNova) put text here
 }
 
 // ContentPart represents a part of multimodal content.

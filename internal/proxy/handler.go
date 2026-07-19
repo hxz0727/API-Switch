@@ -323,11 +323,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 // closeOnCancel closes the given Closer when the context is cancelled.
 // Used to abort upstream reads when the client disconnects.
+// Uses context.AfterFunc for proper cleanup (Go 1.21+).
 func closeOnCancel(ctx context.Context, closer io.Closer) {
-	go func() {
-		<-ctx.Done()
-		closer.Close()
-	}()
+	context.AfterFunc(ctx, func() { _ = closer.Close() })
 }
 
 // handleAnthropic handles requests for Anthropic models (direct passthrough).
@@ -363,7 +361,7 @@ func (s *Server) handleAnthropicNonStreaming(ctx context.Context, w http.Respons
 }
 
 func (s *Server) handleAnthropicStreaming(ctx context.Context, w http.ResponseWriter, antReq *anthropic.MessagesRequest, route *RouteResult, ev *monitor.RequestEvent) {
-	respBody, err := route.Anthropic.StreamMessage(antReq)
+	respBody, err := route.Anthropic.StreamMessageWithContext(ctx, antReq)
 	if err != nil {
 		logutil.Error("Anthropic streaming error: %v", err)
 		writeAnthropicError(w, http.StatusBadGateway, "api_error", err.Error())

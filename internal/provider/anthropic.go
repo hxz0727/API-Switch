@@ -129,6 +129,12 @@ func (c *AnthropicClient) Ping() error {
 // StreamMessage sends a streaming request to the Anthropic API and returns the response body for reading SSE events.
 // It creates a copy of the request to avoid mutating the caller's struct.
 func (c *AnthropicClient) StreamMessage(req *anthropic.MessagesRequest) (io.ReadCloser, error) {
+	return c.StreamMessageWithContext(context.Background(), req)
+}
+
+// StreamMessageWithContext sends a streaming request with context support.
+// It creates a copy of the request to avoid mutating the caller's struct.
+func (c *AnthropicClient) StreamMessageWithContext(ctx context.Context, req *anthropic.MessagesRequest) (io.ReadCloser, error) {
 	// Create a copy to avoid mutating the caller's struct
 	reqCopy := *req
 	reqCopy.Stream = true
@@ -137,7 +143,7 @@ func (c *AnthropicClient) StreamMessage(req *anthropic.MessagesRequest) (io.Read
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	httpReq, err := c.newRequest(bytes.NewReader(body))
+	httpReq, err := c.newRequestWithContext(ctx, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

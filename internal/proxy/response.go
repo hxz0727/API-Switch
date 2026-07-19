@@ -39,6 +39,10 @@ func ConvertOpenAIToAnthropic(oaiResp *openai.ChatCompletionResponse, requestedM
 			}
 		}
 	}
+	// Some providers (SenseNova) put text in the reasoning field instead of content
+	if contentStr == "" && choice.Message.Reasoning != "" {
+		contentStr = choice.Message.Reasoning
+	}
 	if contentStr != "" {
 		content = append(content, anthropic.ContentBlock{
 			Type: "text",

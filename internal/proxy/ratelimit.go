@@ -41,19 +41,7 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 		return true
 	}
 
-	// Trim expired timestamps from the front (they are in chronological order)
-	var valid []int64
-	for _, ts := range timestamps {
-		if ts > cutoff {
-			break
-		}
-		valid = timestamps[1:]
-	}
-	if len(valid) == 0 {
-		valid = nil
-	}
-
-	// Actually, we need to filter properly - find the first non-expired index
+	// Find the first non-expired index
 	start := 0
 	for start < len(timestamps) && timestamps[start] <= cutoff {
 		start++
@@ -62,12 +50,22 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 	// Count requests in the sliding window
 	count := len(timestamps) - start
 	if count >= rl.maxRequests {
+		// Keep the entry but don't add new timestamp; also keep the timestamps
+		// so we can slide the window. If all timestamps are expired after this
+		// decision, clean up.
+		if start == len(timestamps) {
+			delete(rl.requests, clientIP)
+		}
 		return false
 	}
 
 	// Append new timestamp and clean up expired entries
-	timestamps = append(timestamps[start:], now)
-	rl.requests[clientIP] = timestamps
+	if start == len(timestamps) {
+		// All expired — reset with just the new one
+		rl.requests[clientIP] = []int64{now}
+	} else {
+		rl.requests[clientIP] = append(timestamps[start:], now)
+	}
 
 	return true
 }

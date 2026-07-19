@@ -333,6 +333,92 @@ func TestConvertAnthropicToOpenAI_ToolResult(t *testing.T) {
 	}
 }
 
+// TestConvertAnthropicToOpenAI_ModernToolResult verifies the modern Anthropic
+// tool_result format (content block inside a "user" role message) is correctly
+// converted to a separate OpenAI "tool" role message.
+//
+// This is the format Claude Code actually sends. The previous code only
+// handled the legacy top-level "tool_result" role, which Claude Code never uses.
+func TestConvertAnthropicToOpenAI_ModernToolResult(t *testing.T) {
+	antReq := &anthropic.MessagesRequest{
+		Model: "claude-3-opus",
+		Messages: []anthropic.Message{
+			{Role: "user", Content: json.RawMessage(`"what is the weather in Beijing?"`)},
+			{Role: "assistant", Content: json.RawMessage(`[{"type":"tool_use","id":"toolu_001","name":"get_weather","input":{"city":"Beijing"}}]`)},
+			{Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"toolu_001","content":"25°C"}]`)},
+		},
+		MaxTokens: 100,
+	}
+
+	result := ConvertAnthropicToOpenAI(antReq, "gpt-4o", 4096)
+
+	// Expected: user, assistant, tool (3 messages; tool_result is split out)
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", len(result.Messages), result.Messages)
+	}
+
+	// First message: original user
+	if result.Messages[0].Role != "user" {
+		t.Errorf("messages[0]: expected 'user', got %q", result.Messages[0].Role)
+	}
+
+	// Second message: assistant with tool call
+	if result.Messages[1].Role != "assistant" {
+		t.Errorf("messages[1]: expected 'assistant', got %q", result.Messages[1].Role)
+	}
+	if len(result.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("messages[1]: expected 1 tool call, got %d", len(result.Messages[1].ToolCalls))
+	}
+
+	// Third message: tool with correct tool_call_id
+	toolMsg := result.Messages[2]
+	if toolMsg.Role != "tool" {
+		t.Errorf("messages[2]: expected 'tool', got %q", toolMsg.Role)
+	}
+	if toolMsg.ToolCallID != "toolu_001" {
+		t.Errorf("messages[2]: expected tool_call_id 'toolu_001', got %q", toolMsg.ToolCallID)
+	}
+
+	// The assistant's tool_call should NOT be stripped (it now has a following tool msg)
+	if len(result.Messages[1].ToolCalls) != 1 {
+		t.Error("assistant tool_calls were stripped even though tool message follows")
+	}
+}
+
+// TestConvertAnthropicToOpenAI_MultipleToolResults verifies multiple tool_result
+// blocks in a single user message are correctly split into separate tool messages.
+func TestConvertAnthropicToOpenAI_MultipleToolResults(t *testing.T) {
+	antReq := &anthropic.MessagesRequest{
+		Model: "claude-3-opus",
+		Messages: []anthropic.Message{
+			{Role: "assistant", Content: json.RawMessage(`[
+				{"type":"tool_use","id":"toolu_001","name":"get_weather","input":{"city":"Beijing"}},
+				{"type":"tool_use","id":"toolu_002","name":"get_time","input":{"zone":"EST"}}
+			]`)},
+			{Role: "user", Content: json.RawMessage(`[
+				{"type":"tool_result","tool_use_id":"toolu_001","content":"25°C"},
+				{"type":"tool_result","tool_use_id":"toolu_002","content":"10:30 AM"}
+			]`)},
+		},
+		MaxTokens: 100,
+	}
+
+	result := ConvertAnthropicToOpenAI(antReq, "gpt-4o", 4096)
+
+	// Expected: assistant, tool, tool (3 messages)
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result.Messages))
+	}
+	if result.Messages[1].Role != "tool" || result.Messages[1].ToolCallID != "toolu_001" {
+		t.Errorf("messages[1]: expected tool toolu_001, got role=%q id=%q",
+			result.Messages[1].Role, result.Messages[1].ToolCallID)
+	}
+	if result.Messages[2].Role != "tool" || result.Messages[2].ToolCallID != "toolu_002" {
+		t.Errorf("messages[2]: expected tool toolu_002, got role=%q id=%q",
+			result.Messages[2].Role, result.Messages[2].ToolCallID)
+	}
+}
+
 func TestConvertAnthropicToOpenAI_ImageConversion(t *testing.T) {
 	antReq := &anthropic.MessagesRequest{
 		Model: "claude-3-opus",

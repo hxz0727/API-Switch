@@ -26,7 +26,19 @@ type OpenAIClient struct {
 func NewOpenAIClient(cfg *config.ProviderConfig) *OpenAIClient {
 	return &OpenAIClient{
 		cfg:    cfg,
-		client: &http.Client{Timeout: 5 * time.Minute},
+		client: &http.Client{
+			Timeout: 10 * time.Minute,
+			Transport: &http.Transport{
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   20,
+				MaxConnsPerHost:       50,
+				IdleConnTimeout:       120 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+				DisableKeepAlives:     false,
+			},
+		},
 	}
 }
 

@@ -81,6 +81,226 @@ func convertContentBlocks(content json.RawMessage) (string, []openai.ToolCall) {
 	return strings.Join(texts, "\n"), toolCalls
 }
 
+// convertAnthropicMessage converts a single Anthropic message into one or more
+// OpenAI messages and appends them to the messages slice.
+// Returns the number of OpenAI messages appended.
+//
+// Handles modern Anthropic format where tool_result blocks appear INSIDE a
+// "user" role message (Claude Code standard). Each tool_result block becomes
+// its own "tool" role OpenAI message.
+func convertAnthropicMessage(msg anthropic.Message, messages *[]openai.Message) int {
+	emitted := 0
+
+	// Handle legacy top-level "tool_result" role
+	if msg.Role == "tool_result" {
+		oaiMsg := openai.Message{Role: "tool"}
+		var blocks []anthropic.ContentBlock
+		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
+			var contentParts []string
+			for _, b := range blocks {
+				if b.ToolUseID != "" && oaiMsg.ToolCallID == "" {
+					oaiMsg.ToolCallID = b.ToolUseID
+				}
+				if b.Type == "text" && b.Text != "" {
+					contentParts = append(contentParts, b.Text)
+				} else if b.Content != nil {
+					contentParts = append(contentParts, contentToString(b.Content))
+				}
+			}
+			if len(contentParts) > 0 {
+				oaiMsg.Content = strings.Join(contentParts, "\n")
+			}
+		} else {
+			var rawMap map[string]interface{}
+			if json.Unmarshal(msg.Content, &rawMap) == nil {
+				if id, ok := rawMap["tool_use_id"].(string); ok && id != "" {
+					oaiMsg.ToolCallID = id
+				}
+			}
+		}
+		if oaiMsg.Content == "" {
+			oaiMsg.Content = contentToString(msg.Content)
+		}
+		*messages = append(*messages, oaiMsg)
+		return 1
+	}
+
+	// Parse content blocks (modern Anthropic format)
+	var blocks []anthropic.ContentBlock
+	contentIsArray := false
+	if msg.Content != nil {
+		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
+			contentIsArray = true
+		}
+	}
+
+	// Modern Anthropic user message with tool_result blocks: emit one tool msg per result
+	if msg.Role == "user" && contentIsArray {
+		var toolResults []anthropic.ContentBlock
+		var nonResultBlocks []anthropic.ContentBlock
+		for _, b := range blocks {
+			if b.Type == "tool_result" {
+				toolResults = append(toolResults, b)
+			} else {
+				nonResultBlocks = append(nonResultBlocks, b)
+			}
+		}
+
+		// Emit one tool message per tool_result block
+		for _, tr := range toolResults {
+			oaiTool := openai.Message{
+				Role:       "tool",
+				ToolCallID: tr.ToolUseID,
+				Content:    toolResultContent(tr),
+			}
+			*messages = append(*messages, oaiTool)
+			emitted++
+		}
+
+		// If there are non-tool_result blocks, emit a user message with those
+		if len(nonResultBlocks) > 0 {
+			userMsg := openai.Message{Role: "user"}
+			if hasOnlyText(nonResultBlocks) {
+				// All text — send as plain string
+				var texts []string
+				for _, b := range nonResultBlocks {
+					if b.Type == "text" {
+						texts = append(texts, b.Text)
+					}
+				}
+				userMsg.Content = strings.Join(texts, "\n")
+			} else {
+				// Has images or other multimodal content
+				var parts []openai.ContentPart
+				for _, b := range nonResultBlocks {
+					switch b.Type {
+					case "text":
+						parts = append(parts, openai.ContentPart{Type: "text", Text: b.Text})
+					case "image":
+						if b.Source != nil {
+							var imageURL string
+							if b.Source.Type == "base64" && b.Source.Data != "" {
+								imageURL = fmt.Sprintf("data:%s;base64,%s", b.Source.MediaType, b.Source.Data)
+							} else if b.Source.Type == "url" && b.Source.URL != "" {
+								imageURL = b.Source.URL
+							}
+							if imageURL != "" {
+								parts = append(parts, openai.ContentPart{
+									Type:     "image_url",
+									ImageURL: &openai.ImageURL{URL: imageURL},
+								})
+							}
+						}
+					}
+				}
+				if len(parts) > 0 {
+					userMsg.Content = parts
+				}
+			}
+			*messages = append(*messages, userMsg)
+			emitted++
+		}
+
+		// If we emitted at least one tool message, return
+		if emitted > 0 {
+			return emitted
+		}
+	}
+
+	// Standard path: single OpenAI message
+	oaiMsg := openai.Message{Role: msg.Role}
+
+	if msg.Role == "assistant" && contentIsArray {
+		content, toolCalls := convertContentBlocks(msg.Content)
+		oaiMsg.Content = content
+		if len(toolCalls) > 0 {
+			oaiMsg.ToolCalls = toolCalls
+		}
+	} else if msg.Role == "user" && contentIsArray {
+		// User message with images (no tool_results — handled above)
+		var parts []openai.ContentPart
+		for _, b := range blocks {
+			switch b.Type {
+			case "text":
+				parts = append(parts, openai.ContentPart{Type: "text", Text: b.Text})
+			case "image":
+				if b.Source != nil {
+					var imageURL string
+					if b.Source.Type == "base64" && b.Source.Data != "" {
+						imageURL = fmt.Sprintf("data:%s;base64,%s", b.Source.MediaType, b.Source.Data)
+					} else if b.Source.Type == "url" && b.Source.URL != "" {
+						imageURL = b.Source.URL
+					}
+					if imageURL != "" {
+						parts = append(parts, openai.ContentPart{
+							Type:     "image_url",
+							ImageURL: &openai.ImageURL{URL: imageURL},
+						})
+					}
+				}
+			}
+		}
+		if len(parts) > 0 {
+			oaiMsg.Content = parts
+		} else {
+			oaiMsg.Content = contentToString(msg.Content)
+		}
+	} else {
+		oaiMsg.Content = contentToString(msg.Content)
+	}
+
+	*messages = append(*messages, oaiMsg)
+	return 1
+}
+
+// toolResultContent extracts the text content from an Anthropic tool_result block.
+func toolResultContent(tr anthropic.ContentBlock) string {
+	isErr := tr.IsError != nil && *tr.IsError
+	// tool_result content can be a string, array of blocks, or array with text + is_error
+	if tr.Content != nil {
+		// Try to parse as array of content blocks
+		var inner []anthropic.ContentBlock
+		if err := json.Unmarshal(tr.Content, &inner); err == nil {
+			var texts []string
+			for _, b := range inner {
+				if b.Type == "text" && b.Text != "" {
+					texts = append(texts, b.Text)
+				}
+			}
+			if len(texts) > 0 {
+				result := strings.Join(texts, "\n")
+				if isErr {
+					return "[Tool Error] " + result
+				}
+				return result
+			}
+		}
+		// Fall back to plain string
+		var s string
+		if err := json.Unmarshal(tr.Content, &s); err == nil {
+			if isErr {
+				return "[Tool Error] " + s
+			}
+			return s
+		}
+	}
+	// Empty content
+	if isErr {
+		return "[Tool Error]"
+	}
+	return ""
+}
+
+// hasOnlyText reports whether the given blocks are all text blocks.
+func hasOnlyText(blocks []anthropic.ContentBlock) bool {
+	for _, b := range blocks {
+		if b.Type != "text" {
+			return false
+		}
+	}
+	return true
+}
+
 // ConvertAnthropicToOpenAI converts an Anthropic Messages request to an OpenAI ChatCompletion request.
 func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, defaultMaxTokens int) *openai.ChatCompletionRequest {
 	var messages []openai.Message
@@ -111,110 +331,29 @@ func ConvertAnthropicToOpenAI(antReq *anthropic.MessagesRequest, model string, d
 		})
 	}
 
-	// Copy conversation messages (system messages already merged above)
+	// Copy conversation messages, expanding tool_result blocks into separate tool messages
 	for _, msg := range conversationMsgs {
-		oaiMsg := openai.Message{
-			Role: msg.Role,
-		}
-
-		if msg.Role == "assistant" && hasContentBeyondText(msg.Content) {
-			content, toolCalls := convertContentBlocks(msg.Content)
-			oaiMsg.Content = content
-			if len(toolCalls) > 0 {
-				oaiMsg.ToolCalls = toolCalls
-			}
-		} else if msg.Role == "user" && hasContentBeyondText(msg.Content) {
-			// For user messages with images, convert content blocks to OpenAI multimodal format.
-			var blocks []anthropic.ContentBlock
-			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-				var contentParts []openai.ContentPart
-				for _, b := range blocks {
-					switch b.Type {
-					case "text":
-						contentParts = append(contentParts, openai.ContentPart{
-							Type: "text",
-							Text: b.Text,
-						})
-					case "image":
-						if b.Source != nil {
-							// Build the image URL
-							// Anthropic format: {"type": "base64", "media_type": "image/png", "data": "..."}
-							// OpenAI format: {"url": "data:image/png;base64,..."} or direct URL
-							var imageURL string
-							if b.Source.Type == "base64" && b.Source.Data != "" {
-								// Convert base64 data to data URL
-								imageURL = fmt.Sprintf("data:%s;base64,%s", b.Source.MediaType, b.Source.Data)
-							} else if b.Source.Type == "url" && b.Source.URL != "" {
-								// Direct URL
-								imageURL = b.Source.URL
-							}
-							if imageURL != "" {
-								contentParts = append(contentParts, openai.ContentPart{
-									Type: "image_url",
-									ImageURL: &openai.ImageURL{
-										URL: imageURL,
-									},
-								})
-							}
-						}
-					}
-				}
-				if len(contentParts) > 0 {
-					oaiMsg.Content = contentParts
-				} else {
-					oaiMsg.Content = contentToString(msg.Content)
-				}
-			} else {
-				oaiMsg.Content = contentToString(msg.Content)
-			}
-		} else {
-			oaiMsg.Content = contentToString(msg.Content)
-		}
-
-		// Handle tool_result role mapping
-		if msg.Role == "tool_result" {
-			oaiMsg.Role = "tool"
-			// Extract tool_use_id and content from content blocks or plain string
-			var blocks []anthropic.ContentBlock
-			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-				var contentParts []string
-				for _, b := range blocks {
-					if b.ToolUseID != "" && oaiMsg.ToolCallID == "" {
-						oaiMsg.ToolCallID = b.ToolUseID
-					}
-					if b.Type == "text" && b.Text != "" {
-						contentParts = append(contentParts, b.Text)
-					} else if b.Content != nil {
-						contentParts = append(contentParts, contentToString(b.Content))
-					}
-				}
-				if oaiMsg.Content == "" && len(contentParts) > 0 {
-					oaiMsg.Content = strings.Join(contentParts, "\n")
-				}
-			} else {
-				// Plain string content — try to extract ToolUseID from top-level fields
-				var rawMap map[string]interface{}
-				if json.Unmarshal(msg.Content, &rawMap) == nil {
-					if id, ok := rawMap["tool_use_id"].(string); ok && id != "" {
-						oaiMsg.ToolCallID = id
-					}
-				}
-			}
-			if oaiMsg.Content == "" {
-				oaiMsg.Content = contentToString(msg.Content)
-			}
-		}
-
-		messages = append(messages, oaiMsg)
+		emitted := convertAnthropicMessage(msg, &messages)
+		_ = emitted // count not needed; messages appended in place
 	}
 
 	// Strip orphaned tool_calls from assistant messages that lack a following
 	// tool-role message. Some providers (DeepSeek) reject requests where assistant
 	// tool_calls are not immediately followed by paired tool results.
+	// Only strip when the assistant's tool_calls are NOT followed by any tool message.
 	for i := 0; i < len(messages); i++ {
 		if messages[i].Role == "assistant" && len(messages[i].ToolCalls) > 0 {
-			// Check if the very next message is a tool-role response
-			if i+1 >= len(messages) || messages[i+1].Role != "tool" {
+			// Check if there is any "tool" role message anywhere after this index
+			// (not just immediately after, because we may have tool messages at
+			// later positions in the converted stream).
+			hasToolResponse := false
+			for j := i + 1; j < len(messages); j++ {
+				if messages[j].Role == "tool" {
+					hasToolResponse = true
+					break
+				}
+			}
+			if !hasToolResponse {
 				messages[i].ToolCalls = nil
 			}
 		}
