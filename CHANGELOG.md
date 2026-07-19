@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.9.3 (2026-07-19)
+
+### 关键修复: 多轮工具调用
+
+- **CRITICAL: 现代 tool_result 格式被丢弃**: Claude Code 发送 `tool_result` 块在 `user` role 内，转换器只处理旧版顶层 `tool_result` 格式，导致所有多轮工具调用在一轮后失效。修复：从 user 消息中提取 tool_result 块并生成独立的 `tool` role OpenAI 消息
+- **CRITICAL: 孤立 tool_calls 被误删**: 与上一条组合，valid assistant tool_calls 被剥离。修复：检查后续任意位置是否存在 tool 消息，而不仅看相邻位置
+- **`is_error` 标志**: tool_result 的 `is_error: true` 现在添加 `[Tool Error]` 前缀
+
+### 连接池和性能
+
+- **HTTP Transport 调优**: 自定义 `MaxIdleConns=100/per-host=20`、TLSHandshakeTimeout、ResponseHeaderTimeout，防止连接池耗尽
+- **Goroutine 泄漏修复**: `closeOnCancel` 改用 `context.AfterFunc`，避免每次流请求泄漏一个 goroutine
+- **Anthropic ctx 传播**: 新增 `StreamMessageWithContext`，handler 传入客户端 ctx，客户端断开立即取消上游
+
+### SenseNova 兼容性
+
+- **流式 reasoning 字段**: `textDelta = Content || Reasoning`，自动回退
+- **非流式 reasoning 字段**: 新增 `Reasoning` 字段到 `openai.Message`，非流式响应也支持回退
+
+### 测试覆盖
+
+- 集成测试 27 个（多轮、错误、混合块、速率限制、SSE 取消等）
+- 端到端冒烟测试 2 个（真实 httptest + 真实 Server）
+- Provider 单元测试 29 个（HTTP 客户端 87% 覆盖）
+- Config 单元测试 16 个（86.8% 覆盖）
+- Admin 单元测试 22 个（85.5% 覆盖）
+
+---
+
 ## v0.9.2 (2026-07-14)
 
 ### 安全加固 (代码审计)
