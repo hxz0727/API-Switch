@@ -135,6 +135,17 @@ else
   if [ "${yn,,}" != "y" ]; then exit 1; fi
 fi
 
+# Check Gitee token availability
+echo -n "  Checking Gitee token..."
+if [ -n "$GITEE_TOKEN" ]; then
+  green " ✓ set"
+else
+  yellow " ⚠ GITEE_TOKEN not set — release assets (binary + checksums) and release page will be skipped"
+  yellow "    To enable all features, create a Gitee personal access token:"
+  yellow "      https://gitee.com/profile/personal_access_tokens"
+  yellow "    Then export: export GITEE_TOKEN=<your_token>"
+fi
+
 # Check npm login status (if not skipping npm)
 if ! $SKIP_NPM; then
   if [ -n "$NPM_TOKEN" ]; then
@@ -260,23 +271,28 @@ bold "═══ Phase 4: Gitee Release Assets ═══"
 echo ""
 
 if git remote get-url gitee >/dev/null 2>&1; then
-  echo "  Uploading binary + checksums to Gitee release branch..."
-  rm -rf /tmp/gitee-release
-  RELEASE_URL="${GITEE_AUTH_URL:-https://gitee.com/776311606/API-Switch.git}"
-  if git clone -b release "$RELEASE_URL" /tmp/gitee-release 2>/dev/null; then
-    cd /tmp/gitee-release
-    mkdir -p "$VER"
-    BINARY_NAME="api-switch-$PLAT"
-    cp "$BINARY" "$VER/$BINARY_NAME"
-    cp "$CHECKSUMS" "$VER/checksums.txt"
-    git add -f "$VER/$BINARY_NAME" "$VER/checksums.txt"
-    git commit -m "release: $VER $PLAT binary + checksums" 2>&1 || true
-    git push origin release 2>&1
-    cd "$ROOT"
+  if [ -n "$GITEE_TOKEN" ]; then
+    echo "  Uploading binary + checksums to Gitee release branch..."
     rm -rf /tmp/gitee-release
-    green "  ✓ Release branch updated: $VER"
+    if git clone -b release "$GITEE_AUTH_URL" /tmp/gitee-release 2>/dev/null; then
+      cd /tmp/gitee-release
+      mkdir -p "$VER"
+      BINARY_NAME="api-switch-$PLAT"
+      cp "$BINARY" "$VER/$BINARY_NAME"
+      cp "$CHECKSUMS" "$VER/checksums.txt"
+      git add -f "$VER/$BINARY_NAME" "$VER/checksums.txt"
+      git commit -m "release: $VER $PLAT binary + checksums" 2>&1 || true
+      git push origin release 2>&1
+      cd "$ROOT"
+      rm -rf /tmp/gitee-release
+      green "  ✓ Release branch updated: $VER"
+    else
+      yellow "  ⚠ Could not clone Gitee release branch — check GITEE_TOKEN permissions (needs 'projects' scope)"
+    fi
   else
-    yellow "  ⚠ Could not clone Gitee release branch — skipping"
+    yellow "  ⚠ GITEE_TOKEN not set — skipping binary upload"
+    yellow "    Manual upload command:"
+    echo    "    mkdir -p $VER && cp \"$BINARY\" \"$VER/api-switch-$PLAT\" && cp \"$CHECKSUMS\" \"$VER/checksums.txt\""
   fi
 
   # Create Gitee release page
