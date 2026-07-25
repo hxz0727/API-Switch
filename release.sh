@@ -20,6 +20,14 @@ cd "$ROOT"
 GITEE_TOKEN="${GITEE_TOKEN:-}"
 NPM_TOKEN="${NPM_TOKEN:-}"
 
+# Gitee credentials for release branch operations
+GITEE_USER="776311606"
+if [ -n "$GITEE_TOKEN" ]; then
+  GITEE_AUTH_URL="https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/${GITEE_USER}/API-Switch.git"
+else
+  GITEE_AUTH_URL=""
+fi
+
 red()    { echo -e "\033[31m$*\033[0m"; }
 green()  { echo -e "\033[32m$*\033[0m"; }
 yellow() { echo -e "\033[33m$*\033[0m"; }
@@ -67,13 +75,14 @@ echo ""
 bold "═══ Phase 0: Pre-release Checks ═══"
 echo ""
 
-# Check clean git
-if ! git diff --quiet 2>/dev/null; then
-  red "  ✗ Git working tree is dirty — commit or stash changes first"
+# Check clean git (both tracked and untracked)
+if ! git status --porcelain | grep -q '^'; then
+  green "  ✓ Git working tree clean"
+else
+  red "  ✗ Git working tree has uncommitted changes:"
   git status --short
   exit 1
 fi
-green "  ✓ Git working tree clean"
 
 # Check go environment
 if ! command -v go &>/dev/null; then
@@ -253,7 +262,8 @@ echo ""
 if git remote get-url gitee >/dev/null 2>&1; then
   echo "  Uploading binary + checksums to Gitee release branch..."
   rm -rf /tmp/gitee-release
-  if git clone -b release "https://gitee.com/776311606/API-Switch.git" /tmp/gitee-release 2>/dev/null; then
+  RELEASE_URL="${GITEE_AUTH_URL:-https://gitee.com/776311606/API-Switch.git}"
+  if git clone -b release "$RELEASE_URL" /tmp/gitee-release 2>/dev/null; then
     cd /tmp/gitee-release
     mkdir -p "$VER"
     BINARY_NAME="api-switch-$PLAT"
@@ -299,13 +309,13 @@ if $SKIP_NPM; then
   yellow "  Skipping npm (--skip-npm or no token)"
 else
   echo "  Publishing api-switch-cc@$NPM_VER..."
-  echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > npm/.npmrc
-  if npm publish --access public --prefix npm 2>&1; then
+  echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc-publish
+  if npm publish --access public --prefix npm --userconfig ~/.npmrc-publish 2>&1; then
     green "  ✓ Published to npm"
   else
     red "  ✗ npm publish failed — check token permissions (needs 2FA bypass)"
   fi
-  rm -f npm/.npmrc
+  rm -f ~/.npmrc-publish
 fi
 echo ""
 
