@@ -14,6 +14,11 @@
 - **Goroutine 泄漏修复**: `closeOnCancel` 改用 `context.AfterFunc`，避免每次流请求泄漏一个 goroutine
 - **Anthropic ctx 传播**: 新增 `StreamMessageWithContext`，handler 传入客户端 ctx，客户端断开立即取消上游
 
+### 版本管理修复
+
+- **update/version 无限循环**: npm 包装器用严格版本比对 (`===`)，`api-switch update` 升级二进制后，下一次 `api-switch version` 检测到版本不匹配又会回退旧版。修复：改用 `semverGte()`，二进制版本 ≥ npm 包版本时直接接受
+- **Gitee build 版本标签**: `tryGiteeBuild` 从克隆代码时嵌入 git tag 版本而非 npm 包版本
+
 ### SenseNova 兼容性
 
 - **流式 reasoning 字段**: `textDelta = Content || Reasoning`，自动回退

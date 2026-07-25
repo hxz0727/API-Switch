@@ -18,6 +18,24 @@ api-switch serve
 # Install globally
 npm install -g api-switch-cc
 
+# Setup provider
+api-switch setup deepseek --key sk-xxx
+
+# List built-in providers (13+ supported)
+api-switch provider known
+
+# Activate model
+api-switch use deepseek-chat
+
+# Start proxy
+api-switch serve
+
+# Check version (should match package version)
+api-switch version
+```
+
+> **版本管理说明**: `api-switch version` 和 `api-switch update` 现在使用 **semver 向前兼容**比对。如果通过 `api-switch update` 升级了二进制，npm 包装器不会将其回退到旧版本（v0.9.3+）。
+
 # Or run directly
 npx api-switch-cc setup agnes --key sk-xxx
 npx api-switch-cc serve
