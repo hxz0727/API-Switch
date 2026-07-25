@@ -196,40 +196,64 @@ echo ""
 
 # ── Step 2: Build & verify ───────────────────────────────────────
 
-bold "═══ Phase 2: Build Binary ═══"
+bold "═══ Phase 2: Build Binaries ═══"
 echo ""
 
-PLAT="linux-amd64"
-BINARY="/tmp/api-switch-$PLAT"
-CHECKSUMS="/tmp/checksums.txt"
+# Platforms to build: linux-amd64, windows-amd64
+declare -A BINARIES
+BINARIES["linux-amd64"]="api-switch-linux-amd64"
+BINARIES["windows-amd64"]="api-switch-windows-amd64.exe"
+BUILD_DIR="/tmp/api-switch-release"
+mkdir -p "$BUILD_DIR"
 
-echo "  Building $PLAT..."
-go build -ldflags="-s -w -X main.Version=$NPM_VER" -o "$BINARY" ./cmd/api-switch/ 2>/tmp/build-err.log
-if [ $? -ne 0 ]; then
-  red "  Build failed:"
-  cat /tmp/build-err.log
-  exit 1
-fi
+for plat in "${!BINARIES[@]}"; do
+  binary="${BINARIES[$plat]}"
+  echo "  Building $plat..."
 
-# Verify version output
-VER_OUTPUT=$("$BINARY" version 2>/dev/null || echo "FAIL")
-if [ "$VER_OUTPUT" != "api-switch version $NPM_VER" ]; then
-  red "  Version mismatch: expected 'api-switch version $NPM_VER', got '$VER_OUTPUT'"
-  exit 1
-fi
-green "  ✓ Binary: $VER_OUTPUT"
+  GOOS="${plat%-*}"
+  GOARCH="${plat#*-}"
 
-# Verify binary size (must be > 1MB)
-SIZE=$(stat -c%s "$BINARY" 2>/dev/null || stat -f%z "$BINARY" 2>/dev/null)
-if [ "$SIZE" -lt 1048576 ]; then
-  red "  ✗ Binary too small: $SIZE bytes (< 1MB)"
-  exit 1
-fi
-green "  ✓ Binary size: $(( SIZE / 1024 / 1024 ))MB"
+  # windows special case
+  [ "$GOOS" = "windows" ] && GOOS="windows"
+
+  if GOOS="$GOOS" GOARCH="$GOARCH" go build -ldflags="-s -w -X main.Version=$NPM_VER" \
+    -o "$BUILD_DIR/$binary" ./cmd/api-switch/ 2>/tmp/build-err.log; then
+    green "  ✓ $plat built"
+  else
+    red "  ✗ $plat build failed:"
+    cat /tmp/build-err.log
+    exit 1
+  fi
+
+  # Verify version output
+  if [ "$plat" = "linux-amd64" ]; then
+    VER_OUTPUT=$("$BUILD_DIR/$binary" version 2>/dev/null || echo "FAIL")
+    if [ "$VER_OUTPUT" != "api-switch version $NPM_VER" ]; then
+      red "  Version mismatch: expected 'api-switch version $NPM_VER', got '$VER_OUTPUT'"
+      exit 1
+    fi
+    green "  ✓ Version: $VER_OUTPUT"
+  else
+    echo "  ✓ Windows binary (version verification skipped: not executable on Linux)"
+  fi
+
+  # Verify binary size (must be > 1MB)
+  SIZE=$(stat -c%s "$BUILD_DIR/$binary" 2>/dev/null || stat -f%z "$BUILD_DIR/$binary" 2>/dev/null)
+  if [ "$SIZE" -lt 1048576 ]; then
+    red "  ✗ $binary too small: $SIZE bytes (< 1MB)"
+    exit 1
+  fi
+  green "  ✓ $binary size: $(( SIZE / 1024 / 1024 ))MB"
+done
 
 # Generate checksums
-sha256sum "$BINARY" 2>/dev/null | awk -v name="api-switch-$PLAT" '{print $1 "  " name}' > "$CHECKSUMS"
-green "  ✓ Checksums generated: $(head -1 $CHECKSUMS)"
+CHECKSUMS="/tmp/checksums.txt"
+> "$CHECKSUMS"
+for binary in "${BINARIES[@]}"; do
+  sha256sum "$BUILD_DIR/$binary" 2>/dev/null | awk -v name="$binary" '{print $1 "  " name}' >> "$CHECKSUMS"
+done
+green "  ✓ Checksums generated"
+cat "$CHECKSUMS"
 echo ""
 
 # ── Step 3: Commit & tag ─────────────────────────────────────────
@@ -272,16 +296,19 @@ echo ""
 
 if git remote get-url gitee >/dev/null 2>&1; then
   if [ -n "$GITEE_TOKEN" ]; then
-    echo "  Uploading binary + checksums to Gitee release branch..."
+    echo "  Uploading binaries + checksums to Gitee release branch..."
     rm -rf /tmp/gitee-release
     if git clone -b release "$GITEE_AUTH_URL" /tmp/gitee-release 2>/dev/null; then
       cd /tmp/gitee-release
       mkdir -p "$VER"
-      BINARY_NAME="api-switch-$PLAT"
-      cp "$BINARY" "$VER/$BINARY_NAME"
+      # Copy all platform binaries + checksums
+      for binary in "${BINARIES[@]}"; do
+        cp "$BUILD_DIR/$binary" "$VER/$binary"
+        echo "    ✓ $binary"
+      done
       cp "$CHECKSUMS" "$VER/checksums.txt"
-      git add -f "$VER/$BINARY_NAME" "$VER/checksums.txt"
-      git commit -m "release: $VER $PLAT binary + checksums" 2>&1 || true
+      git add -f "$VER/"
+      git commit -m "release: $VER binaries + checksums" 2>&1 || true
       git push origin release 2>&1
       cd "$ROOT"
       rm -rf /tmp/gitee-release
@@ -292,7 +319,8 @@ if git remote get-url gitee >/dev/null 2>&1; then
   else
     yellow "  ⚠ GITEE_TOKEN not set — skipping binary upload"
     yellow "    Manual upload command:"
-    echo    "    mkdir -p $VER && cp \"$BINARY\" \"$VER/api-switch-$PLAT\" && cp \"$CHECKSUMS\" \"$VER/checksums.txt\""
+    yellow "    rm -rf /tmp/gitee-release && git clone -b release https://gitee.com/776311606/API-Switch.git /tmp/gitee-release"
+    yellow "    mkdir -p $VER && cp \"$BUILD_DIR/\"* \"$VER/\" && git add -f \"$VER/\" && git commit -m \"release: $VER\" && git push origin release"
   fi
 
   # Create Gitee release page
@@ -356,7 +384,7 @@ echo ""
 
 # ── Cleanup ──────────────────────────────────────────────────────
 
-rm -f "$BINARY" "$CHECKSUMS" /tmp/build-err.log
+rm -rf "$BUILD_DIR" "$CHECKSUMS" /tmp/build-err.log /tmp/gitee-release* /tmp/.npmrc-test
 
 green "═══ Release $VER complete! ═══"
 echo ""
