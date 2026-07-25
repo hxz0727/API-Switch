@@ -11,6 +11,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// IsProviderTypeRegistered is set by the provider package to avoid circular imports.
+// It checks if a provider type has been registered in the provider registry.
+var IsProviderTypeRegistered func(string) bool
+
 // Config represents the application configuration.
 type Config struct {
 	Server    ServerConfig              `yaml:"server"`
@@ -156,8 +160,15 @@ func (c *Config) Validate() error {
 	}
 
 	for provName, prov := range c.Providers {
-		if prov.Type != "anthropic" && prov.Type != "openai" {
-			return fmt.Errorf("provider %q has invalid type %q (must be 'anthropic' or 'openai')", provName, prov.Type)
+		if IsProviderTypeRegistered != nil {
+			if !IsProviderTypeRegistered(prov.Type) {
+				return fmt.Errorf("provider %q has unregistered type %q; registered types can be viewed with `api-switch provider types`", provName, prov.Type)
+			}
+		} else {
+			// Fallback to hardcoded check if registry not initialized
+			if prov.Type != "anthropic" && prov.Type != "openai" {
+				return fmt.Errorf("provider %q has invalid type %q (must be 'anthropic' or 'openai')", provName, prov.Type)
+			}
 		}
 		if prov.BaseURL == "" {
 			return fmt.Errorf("provider %q has no base_url; set it with `api-switch config set providers.%s.base_url <url>`", provName, provName)

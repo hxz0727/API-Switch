@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/hxz0727/API-Switch/internal/converter"
 )
 
 // mockFlusher implements http.Flusher for testing.
@@ -29,7 +31,6 @@ func (n *nopWriteFlusher) WriteHeader(statusCode int) {}
 func (n *nopWriteFlusher) Flush()                     {}
 
 func TestOpenAIToAnthropicStream_TextDeltas(t *testing.T) {
-	// Simulate OpenAI SSE stream with text content
 	sseInput := strings.Join([]string{
 		`data: {"id":"chatcmpl-001","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`,
 		``,
@@ -53,7 +54,6 @@ func TestOpenAIToAnthropicStream_TextDeltas(t *testing.T) {
 
 	output := buf.String()
 
-	// Should contain message_start, ping, content_block_start, content_block_delta, etc.
 	if !strings.Contains(output, "event: message_start") {
 		t.Error("missing message_start event")
 	}
@@ -146,7 +146,6 @@ func TestOpenAIToAnthropicStream_EmptyInput(t *testing.T) {
 }
 
 func TestOpenAIToAnthropicStream_InvalidJSON(t *testing.T) {
-	// Malformed SSE data should be skipped, not crash
 	sseInput := strings.Join([]string{
 		`data: {invalid json`,
 		``,
@@ -209,7 +208,6 @@ func TestOpenAIToAnthropicStream_NoChoices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Should not crash with empty choices
 }
 
 func TestAnthropicPassthroughStream(t *testing.T) {
@@ -239,12 +237,12 @@ func TestAnthropicPassthroughStream(t *testing.T) {
 	}
 }
 
-// Test writeAnthropicEvent directly
+// Test converter.WriteAnthropicEvent directly
 func TestWriteAnthropicEvent(t *testing.T) {
 	var buf nopWriteFlusher
 	payload := map[string]string{"type": "test_event", "data": "hello"}
 
-	writeAnthropicEvent(&buf, &buf, true, "test", payload)
+	converter.WriteAnthropicEvent(&buf, &buf, true, "test", payload)
 
 	output := buf.String()
 	if !strings.Contains(output, "event: test") {
@@ -258,9 +256,9 @@ func TestWriteAnthropicEvent(t *testing.T) {
 	}
 }
 
-// Test mapFinishReason
+// Test converter.MapFinishReason
 func TestMapFinishReason_Nil(t *testing.T) {
-	result := mapFinishReason(nil)
+	result := converter.MapFinishReason(nil)
 	if result == nil || *result != "end_turn" {
 		t.Errorf("expected 'end_turn', got %v", result)
 	}
@@ -268,7 +266,7 @@ func TestMapFinishReason_Nil(t *testing.T) {
 
 func TestMapFinishReason_Stop(t *testing.T) {
 	s := "stop"
-	result := mapFinishReason(&s)
+	result := converter.MapFinishReason(&s)
 	if result == nil || *result != "end_turn" {
 		t.Errorf("expected 'end_turn', got %v", result)
 	}
@@ -276,14 +274,13 @@ func TestMapFinishReason_Stop(t *testing.T) {
 
 func TestMapFinishReason_Length(t *testing.T) {
 	s := "length"
-	result := mapFinishReason(&s)
+	result := converter.MapFinishReason(&s)
 	if result == nil || *result != "max_tokens" {
 		t.Errorf("expected 'max_tokens', got %v", result)
 	}
 }
 
 func TestOpenAIToAnthropicStream_SenseNovaReasoningField(t *testing.T) {
-	// SenseNova puts response text in the 'reasoning' field instead of 'content'
 	sseInput := strings.Join([]string{
 		`data: {"id":"chatcmpl-001","object":"chat.completion.chunk","created":1234567890,"model":"sensenova-6.7","choices":[{"index":0,"delta":{"reasoning":"你好"},"finish_reason":null}]}`,
 		``,
@@ -305,7 +302,6 @@ func TestOpenAIToAnthropicStream_SenseNovaReasoningField(t *testing.T) {
 
 	output := buf.String()
 
-	// Should contain both pieces of text from the reasoning field
 	if !strings.Contains(output, `"你好"`) {
 		t.Errorf("missing '你好' in output (reasoning field should be used as content)\nOutput:\n%s", output)
 	}
@@ -318,7 +314,6 @@ func TestOpenAIToAnthropicStream_SenseNovaReasoningField(t *testing.T) {
 }
 
 func TestOpenAIToAnthropicStream_ContentOverReasoning(t *testing.T) {
-	// When both content and reasoning are present, content takes priority
 	sseInput := strings.Join([]string{
 		`data: {"id":"x","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello","reasoning":"thinking..."},"finish_reason":null}]}`,
 		``,
@@ -348,32 +343,32 @@ func TestOpenAIToAnthropicStream_ContentOverReasoning(t *testing.T) {
 
 func TestMapFinishReason_ToolCalls(t *testing.T) {
 	s := "tool_calls"
-	result := mapFinishReason(&s)
+	result := converter.MapFinishReason(&s)
 	if result == nil || *result != "tool_use" {
 		t.Errorf("expected 'tool_use', got %v", result)
 	}
 }
 
-// Test toolCallAcc
+// Test converter.ToolCallAcc
 func TestToolCallAcc(t *testing.T) {
-	acc := &toolCallAcc{
-		id:         "call_001",
-		name:       "test_func",
-		blockIndex: 1,
+	acc := &converter.ToolCallAcc{
+		ID:         "call_001",
+		Name:       "test_func",
+		BlockIndex: 1,
 	}
-	acc.arguments.WriteString(`{"key":"value"}`)
+	acc.Arguments.WriteString(`{"key":"value"}`)
 
-	if acc.id != "call_001" {
-		t.Errorf("expected id 'call_001', got %q", acc.id)
+	if acc.ID != "call_001" {
+		t.Errorf("expected id 'call_001', got %q", acc.ID)
 	}
-	if acc.name != "test_func" {
-		t.Errorf("expected name 'test_func', got %q", acc.name)
+	if acc.Name != "test_func" {
+		t.Errorf("expected name 'test_func', got %q", acc.Name)
 	}
-	if acc.blockIndex != 1 {
-		t.Errorf("expected blockIndex 1, got %d", acc.blockIndex)
+	if acc.BlockIndex != 1 {
+		t.Errorf("expected blockIndex 1, got %d", acc.BlockIndex)
 	}
-	if acc.arguments.String() != `{"key":"value"}` {
-		t.Errorf("unexpected arguments: %q", acc.arguments.String())
+	if acc.Arguments.String() != `{"key":"value"}` {
+		t.Errorf("unexpected arguments: %q", acc.Arguments.String())
 	}
 }
 

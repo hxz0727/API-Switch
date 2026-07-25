@@ -1249,13 +1249,13 @@ func TestIntegration_Handler_RoutesToUpstream(t *testing.T) {
 		},
 		MaxTokens: 100,
 	}
-	oaiReq := ConvertAnthropicToOpenAI(antReq, route.ActualModel, route.DefaultMaxTokens)
-
-	resp, err := route.OpenAI.SendMessage(oaiReq)
+	// Use the Provider interface to send the request
+	ctx := context.Background()
+	resp, err := route.Provider.SendMessage(ctx, antReq, route.ActualModel, route.DefaultMaxTokens)
 	if err != nil {
 		t.Fatalf("upstream call failed: %v", err)
 	}
-	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "hi back" {
+	if len(resp.Content) == 0 || resp.Content[0].Text != "hi back" {
 		t.Errorf("unexpected upstream response: %+v", resp)
 	}
 

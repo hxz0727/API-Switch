@@ -580,7 +580,14 @@ func TestCheckClaudeSettings_OtherBaseURL(t *testing.T) {
 
 func TestCheckPort_Default(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Server.Port = 0 // should default to 8080
+	// Find an available port to avoid environment-specific failures
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	cfg.Server.Port = port
 	res := checkPort(cfg)
 	if res.Status != StatusPass {
 		t.Errorf("expected StatusPass for available port, got %q, items: %+v", res.Status, res.Items)

@@ -49,13 +49,26 @@ function hasGit() {
   try { execSync("git --version", { stdio: "pipe" }); return true; } catch (_) { return false; }
 }
 
+function semverGte(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] > pb[i]) return true;
+    if (pa[i] < pb[i]) return false;
+  }
+  return true; // equal
+}
+
 function ensureInstalled() {
   const expectedVer = VERSION.replace(/^v/, ""); // "0.9.0" without v prefix
   if (existsSync(BIN_PATH)) {
     try {
       const current = execSync(`"${BIN_PATH}" version`, { encoding: "utf8", stdio: "pipe", timeout: 5000 }).trim();
       const match = current.match(/(\d+\.\d+\.\d+)/);
-      if (match && match[1] === expectedVer) return;
+      if (match) {
+        // Accept exact match OR newer binary (forward update via api-switch update)
+        if (semverGte(match[1], expectedVer)) return;
+      }
       const oldVer = match ? match[1] : current;
       console.log(`Updating binary from api-switch version ${oldVer} to ${VERSION}...`);
     } catch (_) {}
@@ -96,7 +109,7 @@ function verifyBinary() {
   }
   try {
     const ver = execSync(`"${BIN_PATH}" version`, { encoding: "utf8", stdio: "pipe", timeout: 5000 }).trim();
-    // Strict version match: extract semver from output and compare
+    // Extract semver from output and compare
     const match = ver.match(/v?(\d+\.\d+\.\d+)/);
     if (!match) {
       console.log(`  Binary output unexpected: "${ver}"`);
@@ -104,11 +117,10 @@ function verifyBinary() {
     }
     const binaryVer = match[1];
     const expectedVer = VERSION.replace(/^v/, "");
-    if (binaryVer !== expectedVer) {
-      console.log(`  Binary version mismatch: got v${binaryVer}, expected ${VERSION}`);
-      return false;
-    }
-    return true;
+    // Accept exact match OR newer binary
+    if (semverGte(binaryVer, expectedVer)) return true;
+    console.log(`  Binary version mismatch: got v${binaryVer}, expected ${VERSION}`);
+    return false;
   } catch (_) {
     return false;
   }
@@ -197,7 +209,7 @@ function tryGiteeBuild(plat) {
     try { unlinkSync(BIN_PATH); } catch (_) {}
     execSync(`rm -rf ${tmp} && git clone --depth=1 ${GITEE_REPO} ${tmp}`, { stdio: "pipe", timeout: 60000 });
     execSync(
-      `cd ${tmp} && GOTOOLCHAIN=local GOPROXY=https://goproxy.cn,direct go build -ldflags="-s -w -X main.Version=${VERSION.replace(/^v/, '')}" -o "${BIN_PATH}" ./cmd/api-switch/`,
+      `cd ${tmp} && GOTOOLCHAIN=local GOPROXY=https://goproxy.cn,direct go build -ldflags="-s -w -X main.Version=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo '${VERSION.replace(/^v/, '')}')" -o "${BIN_PATH}" ./cmd/api-switch/`,
       { stdio: "pipe", timeout: 120000 }
     );
     execSync(`rm -rf ${tmp}`, { stdio: "pipe" });

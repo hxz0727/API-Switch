@@ -238,10 +238,14 @@ var dashboardHTML = `<!DOCTYPE html>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;padding:20px}
 h1{font-size:20px;margin-bottom:16px;color:#58a6ff}
+h2{font-size:14px;margin:16px 0 8px;color:#8b949e;text-transform:uppercase}
 .stats{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
 .stat{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px 16px;min-width:120px}
 .stat-label{font-size:11px;color:#8b949e;text-transform:uppercase}
 .stat-value{font-size:22px;font-weight:600;margin-top:4px}
+.stat-value-ok{color:#3fb950}
+.stat-value-warn{color:#d29922}
+.stat-value-error{color:#f85149}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;padding:8px 12px;border-bottom:2px solid #30363d;color:#8b949e;font-size:11px;text-transform:uppercase}
 td{padding:8px 12px;border-bottom:1px solid #21262d}
@@ -251,6 +255,9 @@ tr:hover{background:#161b22}
 .tag-error{background:#4b1b1b;color:#f85149}
 .tag-streaming{background:#1b2d4b;color:#58a6ff}
 .tag-cancelled{background:#333;color:#8b949e}
+.tag-closed{background:#1b4b2e;color:#3fb950}
+.tag-open{background:#4b1b1b;color:#f85149}
+.tag-half_open{background:#4b3b1b;color:#d29922}
 .dur{font-variant-numeric:tabular-nums}
 .model{color:#58a6ff}
 .provider{color:#d2a8ff}
@@ -259,9 +266,17 @@ tr:hover{background:#161b22}
 </style></head>
 <body>
 <h1>API-Switch 实时监控</h1>
-<div class=stats id=stats><div class=stat><div class=stat-label>请求总数</div><div class=stat-value id=total>-</div></div>
-<div class=stat><div class=stat-label>平均耗时</div><div class=stat-value id=avg>-</div></div>
-<div class=stat><div class=stat-label>模型数</div><div class=stat-value id=models>-</div></div></div>
+<div class=stats id=stats>
+<div class=stat><div class=stat-label>请求总数</div><div class=stat-value id=total>-</div></div>
+<div class=stat><div class=stat-label>P50 延迟</div><div class=stat-value id=p50>-</div></div>
+<div class=stat><div class=stat-label>P95 延迟</div><div class=stat-value id=p95>-</div></div>
+<div class=stat><div class=stat-label>P99 延迟</div><div class=stat-value id=p99>-</div></div>
+<div class=stat><div class=stat-label>错误率</div><div class=stat-value id=errorrate>-</div></div>
+<div class=stat><div class=stat-label>模型数</div><div class=stat-value id=models>-</div></div>
+</div>
+<h2>Provider 状态</h2>
+<table><thead><tr><th>Provider</th><th>请求数</th><th>错误率</th><th>P50</th><th>P95</th><th>P99</th><th>熔断器</th></tr></thead><tbody id=providers></tbody></table>
+<h2>最近请求</h2>
 <table><thead><tr><th>时间</th><th>模型</th><th>Provider</th><th>耗时</th><th>状态</th></tr></thead><tbody id=events></tbody></table>
 <script>
 const es=new EventSource('/admin/events');
@@ -280,10 +295,35 @@ if(tbody.children.length>200)tbody.lastChild.remove();
 updateStats(d);
 });
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-let reqCount=0,totalDur=0,modelSet=new Set;
-function updateStats(d){reqCount++;totalDur+=d.duration/1e6;modelSet.add(d.model);
+let reqCount=0,errCount=0,totalDur=0,modelSet=new Set;
+function updateStats(d){
+reqCount++;totalDur+=d.duration/1e6;modelSet.add(d.model);
+if(d.status==='error')errCount++;
 document.getElementById('total').textContent=reqCount;
-document.getElementById('avg').textContent=reqCount?Math.round(totalDur/reqCount)+'ms':'-';
 document.getElementById('models').textContent=modelSet.size;
+document.getElementById('errorrate').textContent=reqCount?((errCount/reqCount)*100).toFixed(1)+'%':'-';
+const erEl=document.getElementById('errorrate');
+erEl.className='stat-value '+(errCount/reqCount>0.1?'stat-value-error':errCount/reqCount>0.05?'stat-value-warn':'stat-value-ok');
 }
+// Fetch initial stats
+fetch('/admin/stats').then(r=>r.json()).then(data=>{
+if(data.stats&&data.stats.latency){
+const l=data.stats.latency;
+document.getElementById('p50').textContent=Math.round(l.p50_ms)+'ms';
+document.getElementById('p95').textContent=Math.round(l.p95_ms)+'ms';
+document.getElementById('p99').textContent=Math.round(l.p99_ms)+'ms';
+}
+if(data.stats&&data.stats.providers){
+const pb=document.getElementById('providers');
+pb.innerHTML='';
+for(const[name,ps]of Object.entries(data.stats.providers)){
+const row=document.createElement('tr');
+const lat=ps.latency||{};
+const er=ps.error_rate||0;
+const erCls=er>10?'stat-value-error':er>5?'stat-value-warn':'stat-value-ok';
+row.innerHTML='<td class=provider>'+esc(name)+'</td><td>'+ps.requests+'</td><td class="'+erCls+'">'+er.toFixed(1)+'%</td><td>'+(lat.p50_ms?Math.round(lat.p50_ms)+'ms':'-')+'</td><td>'+(lat.p95_ms?Math.round(lat.p95_ms)+'ms':'-')+'</td><td>'+(lat.p99_ms?Math.round(lat.p99_ms)+'ms':'-')+'</td><td>-</td>';
+pb.appendChild(row);
+}
+}
+});
 </script></body></html>`
