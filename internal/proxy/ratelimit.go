@@ -71,9 +71,15 @@ func (rl *RateLimiter) Allow(clientIP string) bool {
 }
 
 // rateLimitMiddleware returns a middleware that rate limits requests.
+// It uses the configured server.rate_limit value as the per-IP max.
+// A config value of 0 disables rate limiting entirely.
 func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	// Default: 100 requests per minute per IP
-	limiter := NewRateLimiter(100, time.Minute)
+	// Cached limiter rebuilt when the configured rate limit changes.
+	var (
+		mu            sync.Mutex
+		limiter       *RateLimiter
+		lastRateLimit int
+	)
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip rate limiting if not configured
@@ -83,10 +89,19 @@ func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		// Rebuild limiter if the configured rate limit changed
+		mu.Lock()
+		if limiter == nil || lastRateLimit != cfg.Server.RateLimit {
+			limiter = NewRateLimiter(cfg.Server.RateLimit, time.Minute)
+			lastRateLimit = cfg.Server.RateLimit
+		}
+		rl := limiter
+		mu.Unlock()
+
 		// Get client IP
 		clientIP := getClientIP(r)
 
-		if !limiter.Allow(clientIP) {
+		if !rl.Allow(clientIP) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", "60")
 			w.WriteHeader(http.StatusTooManyRequests)

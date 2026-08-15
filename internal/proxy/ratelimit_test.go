@@ -184,9 +184,8 @@ func TestRateLimitMiddleware_Configured_Allowed(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_Configured_Exceeded(t *testing.T) {
-	// NOTE: the middleware's limiter is hardcoded to 100 requests/minute
-	// (config.RateLimit only enables/disables limiting), so we must send
-	// 101 requests to actually trip the 429 path.
+	// The middleware uses the configured server.rate_limit as the per-IP max,
+	// so with rate_limit=2 the 3rd request trips the 429 path.
 	s := newRateLimitServer(t, 2)
 	called := 0
 
@@ -197,8 +196,8 @@ func TestRateLimitMiddleware_Configured_Exceeded(t *testing.T) {
 
 	clientAddr := "10.0.0.3:1234"
 
-	// First 100 requests allowed
-	for i := 0; i < 100; i++ {
+	// First 2 requests allowed
+	for i := 0; i < 2; i++ {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", "/v1/messages", nil)
 		req.RemoteAddr = clientAddr
@@ -208,14 +207,14 @@ func TestRateLimitMiddleware_Configured_Exceeded(t *testing.T) {
 		}
 	}
 
-	// 101st request exceeds the limit → 429
+	// 3rd request exceeds the configured limit → 429
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/messages", nil)
 	req.RemoteAddr = clientAddr
 	handler(rr, req)
 
-	if called != 100 {
-		t.Errorf("expected wrapped handler called exactly 100 times, got %d", called)
+	if called != 2 {
+		t.Errorf("expected wrapped handler called exactly 2 times, got %d", called)
 	}
 	if rr.Code != http.StatusTooManyRequests {
 		t.Errorf("expected 429, got %d", rr.Code)
@@ -241,15 +240,13 @@ func TestRateLimitMiddleware_Configured_IsolatedPerIP(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Client A consumes its 100 allowances.
-	for i := 0; i < 100; i++ {
-		rr := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/v1/messages", nil)
-		req.RemoteAddr = "10.0.0.4:1111"
-		handler(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("client A request %d: expected 200, got %d", i, rr.Code)
-		}
+	// Client A consumes its 1 allowance.
+	rr0 := httptest.NewRecorder()
+	req0 := httptest.NewRequest("POST", "/v1/messages", nil)
+	req0.RemoteAddr = "10.0.0.4:1111"
+	handler(rr0, req0)
+	if rr0.Code != http.StatusOK {
+		t.Fatalf("client A request 0: expected 200, got %d", rr0.Code)
 	}
 
 	// Client A is now limited.
@@ -258,7 +255,7 @@ func TestRateLimitMiddleware_Configured_IsolatedPerIP(t *testing.T) {
 	reqA.RemoteAddr = "10.0.0.4:1111"
 	handler(rrA, reqA)
 	if rrA.Code != http.StatusTooManyRequests {
-		t.Errorf("client A 101st request: expected 429, got %d", rrA.Code)
+		t.Errorf("client A 2nd request: expected 429, got %d", rrA.Code)
 	}
 
 	// Client B is unaffected.
