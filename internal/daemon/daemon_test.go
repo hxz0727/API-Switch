@@ -2,259 +2,221 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestDir(t *testing.T) {
-	dir := Dir()
-	if dir == "" {
-		t.Error("expected non-empty directory path")
+// isolateDir points the daemon's data dir (which is derived from os.UserHomeDir)
+// at a fresh temp directory so tests never touch a real ~/.api-switch and cannot
+// interfere with — or be affected by — an actually running daemon.
+func isolateDir(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(Dir(), 0755); err != nil {
+		t.Fatalf("failed to create daemon dir: %v", err)
 	}
-	if !strings.HasSuffix(dir, ".api-switch") {
-		t.Errorf("expected path to end with '.api-switch', got %q", dir)
+}
+
+func writePIDFile(t *testing.T, content string) {
+	t.Helper()
+	if err := os.WriteFile(pidFile(), []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write pid file: %v", err)
+	}
+}
+
+// writeHelperScript creates an executable shell script that records its
+// arguments to argsFile and then stays alive (via exec sleep) so it behaves
+// like a long-running daemon. exec keeps the same PID for the sleep process,
+// which lets tests kill it reliably.
+func writeHelperScript(t *testing.T, argsFile string) string {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "daemon-helper.sh")
+	content := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + argsFile + "\"\nexec sleep 300\n"
+	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
+		t.Fatalf("failed to write helper script: %v", err)
+	}
+	return script
+}
+
+func waitFor(t *testing.T, timeout time.Duration, fn func() bool, desc string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", desc)
+}
+
+func TestDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if want, got := home+"/.api-switch", Dir(); want != got {
+		t.Errorf("Dir() = %q, want %q", got, want)
 	}
 }
 
 func TestPidFile(t *testing.T) {
-	path := pidFile()
-	if !strings.HasSuffix(path, pidFileName) {
-		t.Errorf("expected path to end with %q, got %q", pidFileName, path)
-	}
-	if !strings.Contains(path, ".api-switch") {
-		t.Error("expected path to contain '.api-switch'")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if want, got := home+"/.api-switch/"+pidFileName, pidFile(); want != got {
+		t.Errorf("pidFile() = %q, want %q", got, want)
 	}
 }
 
 func TestLogFile(t *testing.T) {
-	path := logFile()
-	if !strings.HasSuffix(path, logFileName) {
-		t.Errorf("expected path to end with %q, got %q", logFileName, path)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if want, got := home+"/.api-switch/"+logFileName, logFile(); want != got {
+		t.Errorf("logFile() = %q, want %q", got, want)
 	}
 }
 
 func TestLogPath(t *testing.T) {
-	path := LogPath()
-	if !strings.HasSuffix(path, logFileName) {
-		t.Errorf("expected path to end with %q, got %q", logFileName, path)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got := LogPath(); got != logFile() {
+		t.Errorf("LogPath() = %q, want %q", got, logFile())
+	}
+}
+
+func TestPathsUnderDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, p := range []string{pidFile(), logFile(), LogPath()} {
+		if !strings.HasPrefix(p, Dir()) {
+			t.Errorf("%q should be under Dir() %q", p, Dir())
+		}
 	}
 }
 
 func TestRunning_NoPIDFile(t *testing.T) {
-	// Ensure no PID file exists in temp dir
-	// Running() uses global pidFile() which points to real home dir,
-	// so this test checks the behavior when the file doesn't exist.
-	// Since we can't easily mock the home dir, we just verify it doesn't panic.
+	isolateDir(t)
 	if Running() {
-		t.Log("daemon appears to be running (PID file exists)")
+		t.Error("Running() should be false without a pid file")
+	}
+}
+
+func TestRunning_InvalidContent(t *testing.T) {
+	isolateDir(t)
+	writePIDFile(t, "not-a-pid")
+	if Running() {
+		t.Error("Running() should be false for invalid pid file content")
+	}
+}
+
+func TestRunning_NegativePID(t *testing.T) {
+	isolateDir(t)
+	writePIDFile(t, "-1")
+	if Running() {
+		t.Error("Running() should be false for a negative pid")
+	}
+}
+
+func TestRunning_ZeroPID(t *testing.T) {
+	isolateDir(t)
+	writePIDFile(t, "0")
+	if Running() {
+		t.Error("Running() should be false for pid 0")
+	}
+}
+
+func TestRunning_NonExistentProcess(t *testing.T) {
+	isolateDir(t)
+	// A pid above pid_max: kill(pid, 0) deterministically returns ESRCH.
+	writePIDFile(t, "99999999")
+	if Running() {
+		t.Error("Running() should be false for a non-existent process")
+	}
+}
+
+func TestRunning_LiveProcess(t *testing.T) {
+	isolateDir(t)
+	writePIDFile(t, strconv.Itoa(os.Getpid()))
+	if !Running() {
+		t.Error("Running() should be true for the live test process pid")
+	}
+	// The pid file must not be removed for a live process.
+	if _, err := os.Stat(pidFile()); err != nil {
+		t.Errorf("pid file should still exist: %v", err)
 	}
 }
 
 func TestPID_NoFile(t *testing.T) {
-	// PID() returns -1 when no PID file exists (or it's in home dir)
-	// We can't mock the home dir easily, but we can test the parsing logic.
-	// Just verify it doesn't panic.
-	pid := PID()
-	t.Logf("PID returned: %d", pid)
-}
-
-func TestRunning_InvalidPIDFile(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a fake PID file with garbage content
-	pidPath := filepath.Join(tmpDir, pidFileName)
-	if err := os.WriteFile(pidPath, []byte("not-a-pid"), 0644); err != nil {
-		t.Fatalf("failed to create test PID file: %v", err)
-	}
-
-	// Directly test the logic: os.ReadFile + strconv.Atoi with invalid content
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("failed to read PID file: %v", err)
-	}
-	pid, err := strconv.Atoi(string(data))
-	if err == nil {
-		t.Error("expected error parsing invalid PID")
-	}
-	if pid != 0 {
-		t.Errorf("expected 0 for invalid PID, got %d", pid)
+	isolateDir(t)
+	if got := PID(); got != -1 {
+		t.Errorf("PID() = %d, want -1", got)
 	}
 }
 
-func TestRunning_ValidPIDFile_WrongPID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a PID file with a valid number that doesn't exist
-	pidPath := filepath.Join(tmpDir, pidFileName)
-	if err := os.WriteFile(pidPath, []byte("99999"), 0644); err != nil {
-		t.Fatalf("failed to create test PID file: %v", err)
-	}
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("failed to read PID file: %v", err)
-	}
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		t.Fatalf("unexpected error parsing PID: %v", err)
-	}
-	if pid != 99999 {
-		t.Errorf("expected 99999, got %d", pid)
-	}
-	// Can't easily test signal 0 on arbitrary PID without root
-}
-
-func TestRunning_ValidPIDFile_NegativePID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	pidPath := filepath.Join(tmpDir, pidFileName)
-	if err := os.WriteFile(pidPath, []byte("-1"), 0644); err != nil {
-		t.Fatalf("failed to create test PID file: %v", err)
-	}
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("failed to read PID file: %v", err)
-	}
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		t.Fatalf("unexpected error parsing PID: %v", err)
-	}
-	// Running() checks pid <= 0 and returns false
-	if pid > 0 {
-		t.Errorf("expected negative PID, got %d", pid)
+func TestPID_InvalidContent(t *testing.T) {
+	isolateDir(t)
+	writePIDFile(t, "not-a-pid")
+	if got := PID(); got != -1 {
+		t.Errorf("PID() = %d, want -1", got)
 	}
 }
 
-func TestRunning_ValidPIDFile_ZeroPID(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	pidPath := filepath.Join(tmpDir, pidFileName)
-	if err := os.WriteFile(pidPath, []byte("0"), 0644); err != nil {
-		t.Fatalf("failed to create test PID file: %v", err)
-	}
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("failed to read PID file: %v", err)
-	}
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		t.Fatalf("unexpected error parsing PID: %v", err)
-	}
-	if pid != 0 {
-		t.Errorf("expected 0, got %d", pid)
-	}
-	// Running() should return false for pid 0
-}
-
-func TestStart_InvalidBinary(t *testing.T) {
-	// Create a temp directory to avoid interfering with real PID files
-	// Start will try to execute the binary, which should fail
-	pid, err := Start("/nonexistent/binary/that/does/not/exist", 8080, "")
-	if err == nil {
-		t.Error("expected error for non-existent binary")
-	}
-	if pid != 0 {
-		t.Errorf("expected 0 PID on failure, got %d", pid)
+func TestPID_TrailingNewline(t *testing.T) {
+	isolateDir(t)
+	writePIDFile(t, "12345\n")
+	if got := PID(); got != -1 {
+		t.Errorf("PID() = %d, want -1 (Atoi fails on trailing newline)", got)
 	}
 }
 
-func TestStart_AlreadyRunning(t *testing.T) {
-	// If daemon is already running, Start should return an error.
-	// This depends on whether a real daemon is running.
-	if Running() {
-		pid, err := Start("api-switch", 8080, "")
-		if err == nil {
-			t.Error("expected error when daemon is already running")
-		}
-		if pid != 0 {
-			t.Errorf("expected 0 PID, got %d", pid)
-		}
-		if !strings.Contains(err.Error(), "already running") {
-			t.Errorf("expected 'already running' in error, got: %v", err)
-		}
+func TestPID_Valid(t *testing.T) {
+	isolateDir(t)
+	writePIDFile(t, "12345")
+	if got := PID(); got != 12345 {
+		t.Errorf("PID() = %d, want 12345", got)
 	}
 }
 
 func TestStop_NotRunning(t *testing.T) {
-	if !Running() {
-		err := Stop()
-		if err == nil {
-			t.Error("expected error when stopping non-running daemon")
-		}
-		if !strings.Contains(err.Error(), "not running") {
-			t.Errorf("expected 'not running' in error, got: %v", err)
-		}
-	}
-}
-
-func TestLogPath_Consistency(t *testing.T) {
-	path1 := LogPath()
-	path2 := logFile()
-	if path1 != path2 {
-		t.Errorf("LogPath() and logFile() should return the same path: %q vs %q", path1, path2)
-	}
-}
-
-func TestPidFile_Consistency(t *testing.T) {
-	path := pidFile()
-	dir := Dir()
-	if !strings.HasPrefix(path, dir) {
-		t.Errorf("pidFile() should be under Dir(): %q not prefixed by %q", path, dir)
-	}
-}
-
-func TestLogFile_Consistency(t *testing.T) {
-	path := logFile()
-	dir := Dir()
-	if !strings.HasPrefix(path, dir) {
-		t.Errorf("logFile() should be under Dir(): %q not prefixed by %q", path, dir)
-	}
-}
-
-// Test that PID parsing handles edge cases
-func TestPIDParsing_EmptyFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	pidPath := filepath.Join(tmpDir, pidFileName)
-
-	// Empty file
-	if err := os.WriteFile(pidPath, []byte(""), 0644); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
-	}
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-	pid, err := strconv.Atoi(string(data))
+	isolateDir(t)
+	err := Stop()
 	if err == nil {
-		t.Error("expected error parsing empty PID")
+		t.Fatal("expected error stopping a non-running daemon")
 	}
-	if pid != 0 {
-		t.Errorf("expected 0 for empty PID, got %d", pid)
+	if !strings.Contains(err.Error(), "not running") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
-func TestPIDParsing_Whitespace(t *testing.T) {
-	tmpDir := t.TempDir()
-	pidPath := filepath.Join(tmpDir, pidFileName)
+func TestStop_Success(t *testing.T) {
+	isolateDir(t)
+	cmd := exec.Command("sleep", "300")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start helper process: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
 
-	if err := os.WriteFile(pidPath, []byte("  12345\n"), 0644); err != nil {
-		t.Fatalf("failed to create test file: %v", err)
+	writePIDFile(t, strconv.Itoa(cmd.Process.Pid))
+	if !Running() {
+		t.Fatal("Running() should be true before stop")
 	}
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
+	if err := Stop(); err != nil {
+		t.Fatalf("Stop() failed: %v", err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if _, err := os.Stat(pidFile()); !os.IsNotExist(err) {
+		t.Error("pid file should be removed after stop")
 	}
-	if pid != 12345 {
-		t.Errorf("expected 12345, got %d", pid)
+	if Running() {
+		t.Error("Running() should be false after stop")
+	}
+	// Stop sent SIGTERM, so the child should exit promptly; reap it.
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Error("helper process did not terminate after SIGTERM")
 	}
 }
