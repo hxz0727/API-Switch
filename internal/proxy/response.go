@@ -1,9 +1,6 @@
 package proxy
 
 import (
-	"fmt"
-	"time"
-
 	"github.com/hxz0727/API-Switch/internal/converter"
 	"github.com/hxz0727/API-Switch/pkg/anthropic"
 	"github.com/hxz0727/API-Switch/pkg/openai"
@@ -24,5 +21,5 @@ func mapOpenAIFinishReason(reason *string) *string {
 // GenerateMessageID generates an Anthropic-style message ID.
 // Deprecated: Use converter.GenerateMessageID instead.
 func GenerateMessageID() string {
-	return fmt.Sprintf("msg_%d", time.Now().UnixNano())
+	return converter.GenerateMessageID()
 }

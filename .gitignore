@@ -4,3 +4,6 @@ package-lock.json
 # Generated files
 *.pyc
 __pycache__/
+
+# npm publish config (contains token reference, never commit)
+npm/.npmrc
